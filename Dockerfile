@@ -26,9 +26,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends python3 make g+
 
 COPY --from=build /app/dist ./dist
 
-# Volume persistente para o SQLite (configure em DATABASE_PATH, ex: /data/enginne.sqlite)
+# Diretório para o SQLite (configure em DATABASE_PATH, ex: /data/enginne.sqlite).
+# Obs: o volume persistente é configurado nativamente no Railway (Settings > Volumes),
+# apontando para /data — a diretiva Docker VOLUME não é suportada pelo builder do Railway.
 RUN mkdir -p /data
-VOLUME ["/data"]
 
 EXPOSE 8787
 USER node
