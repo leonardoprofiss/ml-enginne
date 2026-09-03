@@ -19,10 +19,12 @@ export function createEnginneServer(): McpServer {
     {
       capabilities: { tools: {} },
       instructions:
-        "Enginne é um conector somente-leitura para contas do Mercado Livre administradas pelo usuário. " +
+        "Enginne é um conector para contas do Mercado Livre administradas pelo usuário: leitura de vendas/anúncios/campanhas de Ads, e escrita (criar/editar anúncios). " +
         "Sempre comece uma análise chamando listar_contas() para descobrir os nomes de seller disponíveis. " +
         "Todas as tools recebem `seller` como o nome interno (não o nickname do Mercado Livre). " +
-        "Esta é a V1: nenhuma tool altera dados (sem escrita) — preço, estoque, anúncios e descrições só podem ser lidos.",
+        "consultar_campanhas / consultar_metricas_campanha trazem dados de Product Ads (valor investido, vendas atribuídas, ACOS, ROAS) — diferente de consultar_promocoes, que é sobre descontos/cupons sem custo de mídia. " +
+        "criar_anuncio e editar_anuncio alteram dados reais no Mercado Livre: por padrão (confirmar=false ou omitido) elas só retornam uma PRÉVIA do que seria feito, sem executar nada. " +
+        "SEMPRE mostre essa prévia para a pessoa e espere confirmação explícita antes de chamar a tool de novo com confirmar=true — nunca pule direto para confirmar=true numa única resposta.",
     }
   );
 

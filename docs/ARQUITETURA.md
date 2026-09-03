@@ -77,12 +77,28 @@ Adicionar um novo cliente = três passos, sem alterar código:
 - **`src/mercadolivre`** — cliente HTTP fino sobre a API pública, com rate
   limiting local (token bucket), retry com backoff exponencial + jitter para
   429/5xx, e helpers de paginação (offset e scroll) para contas grandes.
+  - `client.ts` expõe `mlGet` (leitura, sempre com retry) e `mlPost`/`mlPut`
+    (escrita — `mlPost` sem retry automático por padrão, para não arriscar
+    criar um recurso duplicado num timeout; `mlPut` com retry, porque
+    aqui é sempre idempotente: define um estado final, repetir não tem
+    efeito colateral).
+  - `endpoints.ts` — recursos de leitura (items, orders, questions...).
+  - `itemsWrite.ts` — a superfície inteira de escrita sobre `/items`
+    (criar anúncio, editar campos, descrição). Separado de propósito, para
+    ficar fácil auditar "tudo que a Enginne pode alterar de verdade".
+  - `advertisingEndpoints.ts` — wrappers sobre a Advertising API
+    (`/advertising/...`, Product Ads), usada só para campanhas pagas —
+    rota, headers (`Api-Version`) e conceito de `advertiser_id` são
+    diferentes do resto da API do ML.
 - **`src/database`** — SQLite (via better-sqlite3) com os tokens sempre
   cifrados em repouso (AES-256-GCM). Ver "Escalando para Postgres" no README.
-- **`src/tools`** — as 18 tools MCP (17 de leitura + `diagnosticar_integracao`),
+  `audit_log` também registra cada execução de `criar_anuncio`/`editar_anuncio`
+  (seller, evento, resumo da mudança).
+- **`src/tools`** — as tools MCP (leitura + campanhas de Ads + escrita),
   cada uma um `ToolDefinition` com schema Zod + handler. Lógica de
   agregação/comparação fica isolada em `analytics.ts` (funções puras,
-  testadas sem rede).
+  testadas sem rede). `escrita.ts` reúne `criar_anuncio`/`editar_anuncio` e
+  implementa o padrão de confirmação em duas etapas (ver README).
 - **`src/server`** — dois pontos de entrada:
   - `index.ts`: servidor HTTP remoto (Express + Streamable HTTP transport do
     MCP SDK), protegido por Bearer token, com as rotas `/oauth/start` e
@@ -103,6 +119,20 @@ Adicionar um novo cliente = três passos, sem alterar código:
 6. A tool devolve texto pronto para o Claude narrar + `structuredContent`
    com os números brutos, caso o Claude precise recalcular algo.
 
+## Fluxo de uma edição de anúncio (escrita, V2)
+
+1. Usuário: "Muda o preço do MLB123456 para R$ 89,90."
+2. Claude chama `editar_anuncio(seller="moncloa", mlb="MLB123456", preco=89.90)`
+   — sem `confirmar` (o Claude não deve inventar `confirmar: true` sozinho).
+3. O handler em `src/tools/escrita.ts` busca o item atual (`getItem`),
+   monta o diff ("Preço: R$ 79,90 -> R$ 89,90") e retorna como prévia —
+   nenhuma chamada de escrita foi feita na ML ainda.
+4. Claude mostra a prévia para o usuário e pergunta se confirma.
+5. Usuário confirma. Claude chama de novo:
+   `editar_anuncio(seller="moncloa", mlb="MLB123456", preco=89.90, confirmar=true)`.
+6. Agora sim o handler chama `updateItem` → `mlPut(/items/MLB123456, {price: 89.90})`
+   na API do ML, e grava em `audit_log` o resumo da mudança.
+
 ## Segurança em profundidade
 
 - Tokens nunca em texto plano: cifrados com AES-256-GCM antes de tocar o disco.
@@ -112,4 +142,10 @@ Adicionar um novo cliente = três passos, sem alterar código:
   `access_token`, `refresh_token`, `client_secret`, `authorization`.
 - Toda tool que recebe `seller` valida contra o banco antes de tocar a API —
   não existe caminho para um seller acessar dado de outro.
-- V1 é 100% somente leitura: nenhuma tool chama PUT/POST/DELETE na API do ML.
+- V2 introduz escrita: `criar_anuncio`/`editar_anuncio` são as únicas tools
+  que chamam `PUT`/`POST` na API do ML (via `mlPost`/`mlPut` em
+  `client.ts` — nunca `fetch` direto em nenhuma tool). Ambas exigem
+  `confirmar: true` explícito para executar (default é só prévia) e
+  registram a execução em `audit_log`. Não existe tool de exclusão — o
+  máximo é pausar um anúncio (`status: "paused"`), que é como a própria API
+  do Mercado Livre trata "remover" um anúncio.

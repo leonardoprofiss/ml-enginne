@@ -32,3 +32,14 @@ export function daysBetween(fromIso: string, toIso: string): number {
   const ms = new Date(toIso).getTime() - new Date(fromIso).getTime();
   return Math.max(1, Math.round(ms / 86_400_000));
 }
+
+/** Converte um ISO 8601 completo para YYYY-MM-DD (formato exigido pela Advertising API). */
+export function toYmd(iso: string): string {
+  return iso.slice(0, 10);
+}
+
+/** Como `lastNDays`, mas em YYYY-MM-DD — usado pelas tools de Campanhas (Advertising API). */
+export function lastNDaysYmd(days: number): PeriodRange {
+  const p = lastNDays(days);
+  return { from: toYmd(p.from), to: toYmd(p.to), label: p.label };
+}

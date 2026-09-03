@@ -3,8 +3,11 @@
 Conector MCP (Model Context Protocol) que permite ao Claude consultar, em
 linguagem natural, os dados de contas do Mercado Livre que você administra:
 anúncios, estoque, preços, vendas, pedidos, visitas, perguntas, envios,
-reputação e promoções. **V1 é somente leitura** — nenhuma tool altera dados
-no Mercado Livre.
+reputação, promoções e **campanhas de Product Ads (valor investido, vendas
+atribuídas, ACOS, ROAS)**. A partir da **V2**, o Enginne também **escreve**:
+criar e editar anúncios (`criar_anuncio`, `editar_anuncio`) — sempre com uma
+prévia obrigatória antes de qualquer alteração real (ver
+["Escrita: como funciona a confirmação"](#escrita-como-funciona-a-confirmação)).
 
 Arquitetura multi-tenant desde o início: uma aplicação Mercado Livre, N
 sellers (clientes) conectados, cada um com sua própria autorização OAuth e
@@ -25,6 +28,7 @@ desenho completo.
 - [Deploy (hospedagem remota)](#deploy-hospedagem-remota)
 - [Conectar ao Claude](#conectar-ao-claude)
 - [Ferramentas MCP disponíveis](#ferramentas-mcp-disponíveis)
+- [Escrita: como funciona a confirmação](#escrita-como-funciona-a-confirmação)
 - [Escalando para Postgres](#escalando-para-postgres)
 - [Troubleshooting](#troubleshooting)
 - [Segurança](#segurança)
@@ -96,10 +100,24 @@ Passo a passo (conferido na documentação oficial em
        exatamente com o `PUBLIC_BASE_URL` configurado no servidor).
    - **Use PKCE**: marque como habilitado (recomendado; o Enginne já envia
      `code_challenge`/`code_verifier` em todo o fluxo).
-   - **Escopos**: marque **Leitura** (não marque Escrita — a V1 é somente leitura).
-   - **Tópicos/Notificações**: pode deixar em branco por enquanto (o V1 não
-     usa webhooks; é só leitura sob demanda).
+   - **Escopos**: marque **Leitura e Escrita** (a V2 cria/edita anúncios —
+     se marcar só Leitura, `criar_anuncio`/`editar_anuncio` vão falhar com
+     403 mesmo depois de tudo configurado certo).
+   - **Publicidade/Advertising**: se o DevCenter mostrar uma opção separada
+     para habilitar a API de Publicidade (Product Ads), marque também — é o
+     que `consultar_campanhas` usa. Se não aparecer nenhuma opção assim, não
+     se preocupe: pelo que a documentação pública indica hoje, a Advertising
+     API usa o mesmo escopo de leitura padrão, sem produto extra para
+     habilitar — mas confirme no seu painel, porque isso é o tipo de coisa
+     que a ML muda sem avisar.
+   - **Tópicos/Notificações**: pode deixar em branco por enquanto (não
+     usamos webhooks; tudo é sob demanda).
 4. Salve. Você verá o **Client ID** (`APP ID`) e a **Secret Key**.
+
+**Se você já tinha um app da V1 (só leitura):** edite as Configurações desse
+mesmo app e marque também **Escrita** — não precisa criar um app novo. Só
+lembre que sellers que já autorizaram antes continuam com token
+"read-only" até reautorizar (próxima seção).
 
 **O que NÃO compartilhar comigo (Claude):** o Client Secret. Cole-o
 diretamente no seu `.env` local ou no painel de variáveis de ambiente da
@@ -136,8 +154,15 @@ npm run oauth:add-seller -- moncloa
 
 Isso imprime um link. **Envie esse link para o dono da conta do Mercado
 Livre "Moncloa"** abrir no navegador dele e autorizar — é uma etapa humana
-obrigatória (login + tela de consentimento do Mercado Livre). Depois disso,
-confirme com:
+obrigatória (login + tela de consentimento do Mercado Livre, que agora
+inclui a permissão de escrita). Depois disso, confirme com:
+
+> **Seller que já existia antes da V2:** o token dele foi concedido só com
+> escopo "read". Rode `npm run oauth:add-seller -- nome_do_cliente` de novo
+> (mesmo comando de sempre) para gerar um novo link de consentimento — dessa
+> vez já pedindo "read write" — e reenvie para o dono da conta autorizar.
+> Sem isso, `criar_anuncio`/`editar_anuncio` vão falhar com erro 403 só para
+> esse seller, mesmo que o app e o resto do servidor estejam certos.
 
 ```bash
 npm run oauth:list-sellers
@@ -245,13 +270,19 @@ Depois do deploy:
 3. **URL do servidor**: `https://SEU-DOMINIO-RAILWAY/mcp`.
 4. **Autenticação**: Bearer token — cole o valor de `MCP_API_KEY` (o mesmo
    que você configurou nas variáveis de ambiente do servidor).
-5. Salve e teste com: *"Liste minhas contas conectadas do Mercado Livre."*
-   e depois *"Analise as vendas dos últimos 30 dias de uma das contas."*
+5. Salve e teste com: *"Liste minhas contas conectadas do Mercado Livre."*,
+   depois *"Analise as vendas dos últimos 30 dias de uma das contas."* e
+   *"Quanto foi investido em campanhas de Ads nos últimos 30 dias?"*. Para
+   testar escrita com segurança, peça algo como *"Edite o preço do anúncio
+   MLBxxxxx para R$ 99,90"* — o Claude deve mostrar a prévia (nada muda
+   ainda) antes de perguntar se pode confirmar.
 
 ## Ferramentas MCP disponíveis
 
-Todas somente leitura. `seller` é sempre o **nome interno** (não o nickname
-do Mercado Livre) — descubra os nomes com `listar_contas`.
+`seller` é sempre o **nome interno** (não o nickname do Mercado Livre) —
+descubra os nomes com `listar_contas`.
+
+### Leitura
 
 | Tool | Descrição |
 |---|---|
@@ -268,11 +299,58 @@ do Mercado Livre) — descubra os nomes com `listar_contas`.
 | `consultar_perguntas` | Perguntas recebidas (padrão: não respondidas) |
 | `consultar_envios` | Status de um envio específico |
 | `consultar_reputacao` | Nível de reputação, power seller, métricas |
-| `consultar_promocoes` | Campanhas/promoções ativas |
+| `consultar_promocoes` | Descontos/cupons ativos (sem custo de mídia) |
+| `consultar_campanhas` | **Novo.** Campanhas de Product Ads: valor investido, vendas atribuídas, cliques, impressões, CTR, ACOS, ROAS no período |
+| `consultar_metricas_campanha` | **Novo.** Detalhe + métricas completas de uma campanha específica |
 | `buscar_produtos_sem_vendas` | Produtos com estoque e zero vendas no período |
 | `comparar_periodos` | Compara período atual vs. anterior (faturamento, conversão, produtos que subiram/caíram) |
 | `analisar_queda_vendas` | SKUs com maior queda de vendas, ordenados |
 | `diagnosticar_integracao` | Checagem de saúde: API ML, OAuth, banco, MCP, seller, token |
+
+### Escrita (V2 — ação real no Mercado Livre)
+
+| Tool | Descrição |
+|---|---|
+| `criar_anuncio` | Cria um anúncio novo (título, categoria, preço, estoque, tipo de anúncio, condição, descrição, fotos, atributos) |
+| `editar_anuncio` | Edita título, preço, estoque, status (ativo/pausado) e/ou descrição de um anúncio existente |
+
+Ambas exigem `confirmar: true` para executar de fato — ver próxima seção.
+
+## Escrita: como funciona a confirmação
+
+`criar_anuncio` e `editar_anuncio` seguem sempre o mesmo padrão de duas
+etapas, para que uma alteração real nunca aconteça sem alguém ter visto o
+que ia mudar:
+
+1. **Chamada sem `confirmar` (ou `confirmar: false`)** — a tool valida os
+   dados, busca o estado atual (no caso de `editar_anuncio`) e devolve uma
+   **prévia em texto** do que seria criado/alterado. Nenhuma chamada de
+   escrita é feita na API do Mercado Livre nesse passo.
+2. **Chamada de novo, com os mesmos dados e `confirmar: true`** — só então
+   a tool executa o `POST`/`PUT` de verdade na ML.
+
+As instruções do servidor MCP (`src/server/mcpServer.ts`) já pedem
+explicitamente ao Claude para mostrar essa prévia à pessoa e esperar
+confirmação dela antes de reenviar com `confirmar: true` — mas isso é uma
+instrução de comportamento, não uma trava técnica: um cliente MCP mal
+configurado (ou uma automação) tecnicamente pode enviar `confirmar: true`
+de primeira. Toda execução (independente de quem chamou) fica registrada em
+`audit_log` (tabela local, ver `src/database/schema.sql`) com seller, ação e
+um resumo do que mudou — é o rastro para auditoria se algo parecer errado.
+
+Limitações atuais de `criar_anuncio`/`editar_anuncio` (V2, primeira versão
+de escrita):
+- Não há tool para descobrir `category_id` ou os atributos obrigatórios de
+  uma categoria — isso ainda precisa ser feito fora do Enginne (painel do
+  Mercado Livre ou API de categorias) antes de chamar `criar_anuncio`. Se
+  faltar um atributo obrigatório, a ML retorna erro e a mensagem repassada
+  pela tool cita qual.
+- `editar_anuncio` não cobre itens com variações (estoque por
+  variação/tamanho/cor) nem troca de categoria — só título, preço, estoque
+  do item "simples", status e descrição.
+- Não há tool de exclusão: no Mercado Livre um anúncio não é apagado, só
+  pausado (`editar_anuncio` com `status: "pausado"`) — é assim mesmo na API
+  oficial, não é uma limitação só do Enginne.
 
 ## Escalando para Postgres
 
@@ -316,5 +394,8 @@ segue:
 - Endpoint MCP protegido por Bearer token.
 - Isolamento estrito entre sellers — toda tool valida o seller contra o
   banco antes de qualquer chamada à API.
-- V1 é somente leitura — nenhuma tool executa PUT/POST/DELETE na API do
-  Mercado Livre.
+- V2 introduz escrita (`criar_anuncio`, `editar_anuncio`): toda mutação
+  passa por `mlPost`/`mlPut` (nunca `fetch` direto), exige `confirmar: true`
+  explícito (ver ["Escrita: como funciona a confirmação"](#escrita-como-funciona-a-confirmação))
+  e é registrada em `audit_log` com seller + resumo da mudança. Não existe
+  tool de exclusão — o máximo que o Enginne faz é pausar um anúncio.
