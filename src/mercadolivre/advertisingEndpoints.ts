@@ -126,7 +126,12 @@ export async function listCampaigns(
     limit?: number;
   }
 ): Promise<MlCampaignListResult> {
-  return mlGet<MlCampaignListResult>(sellerName, `/advertising/advertisers/${advertiserId}/product_ads/campaigns`, {
+  // NOTA (2026-09-03): testado em produção contra um advertiser_id real e válido —
+  // o path SEM "/search" retorna 404 mesmo para advertiser existente (não é "sem
+  // campanhas", é rota errada). Corrigido para "/search", que é o formato usado
+  // por integrações de terceiros que já têm isso funcionando. Se voltar a dar
+  // 404, o próximo suspeito é method/params, não mais este path.
+  return mlGet<MlCampaignListResult>(sellerName, `/advertising/advertisers/${advertiserId}/product_ads/campaigns/search`, {
     query: {
       date_from: params.dateFrom,
       date_to: params.dateTo,
