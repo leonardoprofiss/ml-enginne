@@ -1,7 +1,7 @@
 {
   "name": "ml-enginne",
   "version": "0.1.0",
-  "description": "MCP Server 'Enginne' — integração multi-tenant (multi-seller) entre o Mercado Livre e o Claude via Model Context Protocol. V1 somente leitura.",
+  "description": "MCP Server 'Enginne' — integração multi-tenant (multi-seller) entre o Mercado Livre e o Claude via Model Context Protocol. V2: leitura + campanhas de Ads (Product Ads) + escrita de anúncios (criar/editar).",
   "type": "module",
   "private": true,
   "engines": {

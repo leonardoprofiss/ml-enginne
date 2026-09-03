@@ -16,10 +16,15 @@ const log = childLogger("oauth");
  * - PKCE é opcional mas recomendado; usamos sempre (S256).
  * - `state` é obrigatório na prática para amarrar a resposta ao seller certo
  *   (o ML não valida o state — a validação é responsabilidade nossa).
- * - scope solicitado: "offline_access read" (somente leitura + refresh token).
+ * - scope solicitado: "offline_access read write" (V2 — inclui escrita, para
+ *   criar_anuncio/editar_anuncio; V1 pedia só "offline_access read"). Um
+ *   seller que autorizou na V1 tem token com escopo antigo (só "read") — as
+ *   tools de escrita retornam 403 da ML para ele até reautorizar
+ *   (`npm run oauth:add-seller -- <seller>` de novo gera um novo consentimento
+ *   já com "write").
  */
 
-export const OAUTH_SCOPE = "offline_access read";
+export const OAUTH_SCOPE = "offline_access read write";
 
 export function getRedirectUri(): string {
   return new URL("/oauth/callback", env.PUBLIC_BASE_URL).toString();
