@@ -1,0 +1,48 @@
+{
+  "name": "ml-enginne",
+  "version": "0.1.0",
+  "description": "MCP Server 'Enginne' — integração multi-tenant (multi-seller) entre o Mercado Livre e o Claude via Model Context Protocol. V2: leitura + campanhas de Ads (Product Ads) + escrita de anúncios (criar/editar).",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "main": "dist/server/index.js",
+  "bin": {
+    "ml-enginne": "dist/server/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && mkdir -p dist/database && cp src/database/schema.sql dist/database/schema.sql",
+    "dev": "tsx watch src/server/index.ts",
+    "dev:stdio": "tsx src/server/stdio.ts",
+    "start": "node dist/server/index.js",
+    "start:stdio": "node dist/server/stdio.js",
+    "db:migrate": "tsx src/database/migrate.ts",
+    "oauth:add-seller": "tsx scripts/add-seller.ts",
+    "oauth:list-sellers": "tsx scripts/list-sellers.ts",
+    "oauth:remove-seller": "tsx scripts/remove-seller.ts",
+    "oauth:renew-seller": "tsx scripts/renew-seller.ts",
+    "diagnose": "tsx scripts/diagnose.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.19.1",
+    "better-sqlite3": "^11.10.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "pino": "^9.5.0",
+    "pino-pretty": "^11.3.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
