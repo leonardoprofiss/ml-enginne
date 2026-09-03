@@ -23,10 +23,18 @@ import { mlGet } from "./client.js";
  * documentação atual antes de assumir bug no código.
  */
 
-const ADVERTISING_API_VERSION = "1";
+// NOTA (2026-09-03): a Advertising API não usa uma única versão para tudo —
+// confirmado na documentação oficial (developers.mercadolivre.com.br/en_us/product-ads-us-read):
+// o endpoint de advertisers (`listAdvertisers`) usa `Api-Version: 1`, mas os
+// endpoints de campanhas (busca/detalhe/métricas) usam `Api-Version: 2`. Usar
+// a versão errada faz a ML tratar a rota como inexistente (404 "no static
+// resource"), mesmo com o path certo — foi exatamente o que causou o 404 em
+// produção contra o advertiser_id 3046120 (path certo, versão errada).
+const ADVERTISER_API_VERSION = "1";
+const CAMPAIGN_API_VERSION = "2";
 
-function adsHeaders(extra?: Record<string, string>): Record<string, string> {
-  return { "Api-Version": ADVERTISING_API_VERSION, ...extra };
+function adsHeaders(version: string, extra?: Record<string, string>): Record<string, string> {
+  return { "Api-Version": version, ...extra };
 }
 
 // ---- Advertisers ----
@@ -48,7 +56,7 @@ export type MlAdsProduct = "PADS" | "DISPLAY" | "BADS";
 export async function listAdvertisers(sellerName: string, productId: MlAdsProduct = "PADS"): Promise<MlAdvertiser[]> {
   const res = await mlGet<{ advertisers: MlAdvertiser[] }>(sellerName, "/advertising/advertisers", {
     query: { product_id: productId },
-    headers: adsHeaders(),
+    headers: adsHeaders(ADVERTISER_API_VERSION),
   });
   return res.advertisers ?? [];
 }
@@ -126,12 +134,14 @@ export async function listCampaigns(
     limit?: number;
   }
 ): Promise<MlCampaignListResult> {
-  // NOTA (2026-09-03): testado em produção contra um advertiser_id real e válido —
-  // o path SEM "/search" retorna 404 mesmo para advertiser existente (não é "sem
-  // campanhas", é rota errada). Corrigido para "/search", que é o formato usado
-  // por integrações de terceiros que já têm isso funcionando. Se voltar a dar
-  // 404, o próximo suspeito é method/params, não mais este path.
-  return mlGet<MlCampaignListResult>(sellerName, `/advertising/advertisers/${advertiserId}/product_ads/campaigns/search`, {
+  // NOTA (2026-09-03), 2ª correção: o 404 anterior (com ou sem "/search" no
+  // path) NÃO era o path — era o header `Api-Version`. A doc oficial mostra
+  // "Api-Version: 1" só para o endpoint de advertisers; campanhas usa
+  // "Api-Version: 2". A tentativa anterior de adicionar "/search" ao path
+  // (mantendo a versão errada) resultou em 404 "no static resource", ou seja,
+  // rota inexistente de verdade — confirmando que "/search" NÃO existe nesse
+  // recurso. Path correto: sem "/search", com Api-Version 2.
+  return mlGet<MlCampaignListResult>(sellerName, `/advertising/advertisers/${advertiserId}/product_ads/campaigns`, {
     query: {
       date_from: params.dateFrom,
       date_to: params.dateTo,
@@ -141,7 +151,7 @@ export async function listCampaigns(
       offset: params.offset ?? 0,
       limit: params.limit ?? 50,
     },
-    headers: adsHeaders(),
+    headers: adsHeaders(CAMPAIGN_API_VERSION),
   });
 }
 
@@ -157,7 +167,7 @@ export async function getCampaign(
     `/advertising/advertisers/${advertiserId}/product_ads/campaigns/${campaignId}`,
     {
       query: { date_from: params.dateFrom, date_to: params.dateTo, metrics: CAMPAIGN_METRICS.join(",") },
-      headers: adsHeaders(),
+      headers: adsHeaders(CAMPAIGN_API_VERSION),
     }
   );
 }
