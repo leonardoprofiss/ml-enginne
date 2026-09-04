@@ -1,4 +1,4 @@
-import { mlGet } from "./client.js";
+import { mlGet, mlPost } from "./client.js";
 import { paginateScan, collect } from "./pagination.js";
 
 /**
@@ -198,6 +198,19 @@ export async function searchQuestions(
   });
 }
 
+/**
+ * POST /answers/ — responde uma pergunta de comprador. Único endpoint de
+ * ESCRITA neste arquivo (o resto de `endpoints.ts` é só leitura de
+ * propósito) porque é simples e de baixo risco (não mexe em dinheiro nem em
+ * estoque/preço) — mas ainda assim é uma ação pública e, até onde a
+ * documentação oficial indica, sem endpoint de "desfazer". A tool que chama
+ * isto (`responder_pergunta`, em engajamento.ts) usa o mesmo padrão de
+ * prévia + confirmar=true das tools de escrita de anúncio.
+ */
+export async function answerQuestion(sellerName: string, questionId: number | string, text: string): Promise<{ id: number }> {
+  return mlPost<{ id: number }>(sellerName, "/answers", { question_id: Number(questionId), text });
+}
+
 // ---- Shipments (envios) ----
 export interface MlShipment {
   id: number;
@@ -250,3 +263,60 @@ export const listPromotions = (sellerName: string, userId: string) =>
 
 // ---- Prices (histórico simplificado via item) ----
 export const getItemPrice = (sellerName: string, itemId: string) => getItem(sellerName, itemId);
+
+// ---- Marketplace search (pesquisa de mercado / concorrência) ----
+
+/**
+ * GET /sites/{site_id}/search — a mesma busca pública que roda na caixa de
+ * busca do site do Mercado Livre. Usamos o token do seller pra autenticar
+ * (a API passou a exigir um access_token válido, mas não precisa ser o
+ * token do dono dos anúncios encontrados — qualquer seller autenticado
+ * pode pesquisar). Serve pra checar preço/posição da concorrência para um
+ * termo ou categoria, sem depender de Product Ads estar habilitado.
+ */
+export interface MlSearchResultItem {
+  id: string;
+  title: string;
+  price: number;
+  original_price?: number | null;
+  currency_id: string;
+  available_quantity: number;
+  sold_quantity: number;
+  condition: string; // new, used
+  permalink: string;
+  thumbnail?: string;
+  seller: { id: number; nickname?: string };
+  shipping?: { free_shipping: boolean };
+  official_store_id?: number | null;
+  tags?: string[]; // ex.: "good_quality_picture", "extended_warranty", "loyalty_discount_eligible"
+}
+
+export interface MlSearchResult {
+  site_id: string;
+  paging: { total: number; offset: number; limit: number };
+  results: MlSearchResultItem[];
+}
+
+export async function searchMarketplace(
+  sellerName: string,
+  siteId: string,
+  params: {
+    q?: string;
+    categoryId?: string;
+    offset?: number;
+    limit?: number;
+    sort?: "relevance" | "price_asc" | "price_desc";
+    condition?: "new" | "used";
+  }
+): Promise<MlSearchResult> {
+  return mlGet<MlSearchResult>(sellerName, `/sites/${siteId}/search`, {
+    query: {
+      q: params.q,
+      category: params.categoryId,
+      offset: params.offset ?? 0,
+      limit: params.limit ?? 20,
+      sort: params.sort && params.sort !== "relevance" ? params.sort : undefined,
+      condition: params.condition,
+    },
+  });
+}
