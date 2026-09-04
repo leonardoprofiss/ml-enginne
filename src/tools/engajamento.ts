@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { resolveSeller } from "./resolveSeller.js";
 import { ok, toErrorResult, type ToolDefinition } from "./types.js";
-import { getItemsVisits, searchQuestions } from "../mercadolivre/endpoints.js";
+import { getItemsVisits, searchQuestions, answerQuestion } from "../mercadolivre/endpoints.js";
+import { recordAudit } from "../database/sellersRepo.js";
 import { lastNDays } from "./dateUtils.js";
 
 const visitasSchema = {
@@ -54,6 +55,48 @@ export const consultarPerguntasTool: ToolDefinition<typeof perguntasSchema> = {
       });
     } catch (err) {
       return toErrorResult(err, "consultar_perguntas");
+    }
+  },
+};
+
+// ---- responder_pergunta ----
+
+const responderPerguntaSchema = {
+  seller: z.string().describe("Nome interno do seller"),
+  perguntaId: z.string().describe("ID da pergunta a responder (ver consultar_perguntas)"),
+  texto: z.string().min(1).max(2000).describe("Texto da resposta (máximo 2000 caracteres, mesmo limite que a ML aplica)"),
+  confirmar: z
+    .boolean()
+    .optional()
+    .describe(
+      "Só publica a resposta de fato quando true. Default false: nesse caso a tool só mostra uma prévia do que seria respondido, sem publicar nada."
+    ),
+};
+
+export const responderPerguntaTool: ToolDefinition<typeof responderPerguntaSchema> = {
+  name: "responder_pergunta",
+  title: "Responder pergunta de comprador",
+  description:
+    "Publica uma resposta para uma pergunta feita por um comprador em um anúncio. AÇÃO PÚBLICA: fica visível para todo mundo no anúncio e, até onde a documentação da ML indica, não há como apagar/editar depois. Por padrão só mostra uma prévia — chame de novo com confirmar=true para publicar de verdade.",
+  inputSchema: responderPerguntaSchema,
+  handler: async ({ seller, perguntaId, texto, confirmar }) => {
+    try {
+      resolveSeller(seller);
+
+      if (!confirmar) {
+        return ok(
+          `PRÉVIA — nada foi publicado ainda. Isto vai responder a pergunta ${perguntaId} para ${seller} com o texto:\n\n"${texto}"\n\n` +
+            `Se estiver correto, chame responder_pergunta novamente com os mesmos dados e confirmar=true para publicar de verdade.`,
+          { preview: true, wouldAnswer: { seller, perguntaId, texto } }
+        );
+      }
+
+      const res = await answerQuestion(seller, perguntaId, texto);
+      recordAudit(seller, "pergunta_respondida", `pergunta ${perguntaId}: "${texto.slice(0, 200)}"`);
+
+      return ok(`Resposta publicada na pergunta ${perguntaId} (resposta ${res.id}):\n"${texto}"`, { answerId: res.id, perguntaId, texto });
+    } catch (err) {
+      return toErrorResult(err, "responder_pergunta");
     }
   },
 };
