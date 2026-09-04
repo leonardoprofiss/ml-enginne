@@ -12,7 +12,14 @@ import { consultarVisitasTool, consultarPerguntasTool } from "./engajamento.js";
 import { consultarEnviosTool, consultarReputacaoTool, consultarPromocoesTool } from "./logistica.js";
 import { buscarProdutosSemVendasTool, compararPeriodosTool, analisarQuedaVendasTool } from "./analises.js";
 import { diagnosticarIntegracaoTool } from "./diagnostico.js";
-import { consultarCampanhasTool, consultarMetricasCampanhaTool } from "./campanhas.js";
+import {
+  consultarCampanhasTool,
+  consultarMetricasCampanhaTool,
+  consultarCompetitividadeCampanhaTool,
+  consultarAdGroupsTool,
+  consultarItensAdGroupTool,
+  buscarAdGroupPorSkuTool,
+} from "./campanhas.js";
 import { criarAnuncioTool, editarAnuncioTool } from "./escrita.js";
 
 /**
@@ -44,6 +51,10 @@ export const allTools: ToolDefinition<any>[] = [
   consultarPromocoesTool,
   consultarCampanhasTool,
   consultarMetricasCampanhaTool,
+  consultarCompetitividadeCampanhaTool,
+  consultarAdGroupsTool,
+  consultarItensAdGroupTool,
+  buscarAdGroupPorSkuTool,
   buscarProdutosSemVendasTool,
   compararPeriodosTool,
   analisarQuedaVendasTool,
