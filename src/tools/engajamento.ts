@@ -3,12 +3,12 @@ import { resolveSeller } from "./resolveSeller.js";
 import { ok, toErrorResult, type ToolDefinition } from "./types.js";
 import { getItemsVisits, searchQuestions, answerQuestion } from "../mercadolivre/endpoints.js";
 import { recordAudit } from "../database/sellersRepo.js";
-import { lastNDays } from "./dateUtils.js";
+import { lastNDaysYmd } from "./dateUtils.js";
 
 const visitasSchema = {
   seller: z.string().describe("Nome interno do seller"),
   mlbs: z.array(z.string()).min(1).max(50).describe("Lista de IDs de anúncios (MLB...) a consultar, até 50 por chamada"),
-  dias: z.number().int().positive().max(365).optional().describe("Janela em dias (default 30)"),
+  dias: z.number().int().positive().max(150).optional().describe("Janela em dias (default 30). Limitado a 150 porque é o máximo que a API de Visitas do Mercado Livre aceita por chamada."),
 };
 
 export const consultarVisitasTool: ToolDefinition<typeof visitasSchema> = {
@@ -19,7 +19,9 @@ export const consultarVisitasTool: ToolDefinition<typeof visitasSchema> = {
   handler: async ({ seller, mlbs, dias }) => {
     try {
       resolveSeller(seller);
-      const period = lastNDays(dias ?? 30);
+      // date_from/date_to da API de Visitas exigem YYYY-MM-DD — um ISO completo
+      // (com hora/milissegundos) é rejeitado com "unknown date format".
+      const period = lastNDaysYmd(dias ?? 30);
       const visits = await getItemsVisits(seller, mlbs, period.from, period.to);
       const lines = Object.entries(visits).map(([id, v]) => `- ${id}: ${v} visitas`);
       return ok(`Visitas em ${period.label}:\n${lines.join("\n")}`, { period, visits });
@@ -96,7 +98,4 @@ export const responderPerguntaTool: ToolDefinition<typeof responderPerguntaSchem
 
       return ok(`Resposta publicada na pergunta ${perguntaId} (resposta ${res.id}):\n"${texto}"`, { answerId: res.id, perguntaId, texto });
     } catch (err) {
-      return toErrorResult(err, "responder_pergunta");
-    }
-  },
-};
+      return
