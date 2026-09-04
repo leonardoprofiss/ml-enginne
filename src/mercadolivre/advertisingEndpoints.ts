@@ -1,322 +1,438 @@
-import { mlGet, mlPost } from "./client.js";
-import { paginateScan, collect } from "./pagination.js";
+import { mlGet } from "./client.js";
 
 /**
- * Wrappers tipados sobre os recursos públicos da API do Mercado Livre
- * (api.mercadolibre.com). Mantidos deliberadamente "finos": cada função
- * mapeia 1:1 para um endpoint documentado, sem lógica de negócio — a lógica
- * de negócio (comparações, agregações) mora em src/tools/.
+ * Wrappers sobre a API de Publicidade (Advertising API / Product Ads) do
+ * Mercado Livre — usada para campanhas pagas (patrocinados), diferente de
+ * `/seller-promotions` (descontos/cupons, já coberto em `listPromotions`).
  *
- * Referência: https://developers.mercadolivre.com.br/pt_br (API Docs)
+ * ATENÇÃO (2026-09-04): a partir de 27/05/2026 o Mercado Livre desativou
+ * PERMANENTEMENTE os endpoints "legados" de Product Ads (confirmado na
+ * documentação oficial: developers.mercadolivre.com.br/pt_br/product-ads-para-catalogo-e-user-products-leitura,
+ * seção "Endpoints descontinuados"). Isso incluía o endpoint que este
+ * arquivo usava até então:
+ *
+ *     GET /advertising/advertisers/$ADVERTISER_ID/product_ads/campaigns
+ *
+ * — por isso `consultar_campanhas` vinha retornando erro em produção mesmo
+ * com advertiser_id, escopo OAuth e header Api-Version corretos: a rota
+ * simplesmente não existe mais, para ninguém, desde aquela data. Não era
+ * bug de configuração nem do nosso lado nem (apesar do suporte ter
+ * insistido o contrário) puramente do lado deles — era migração de API já
+ * documentada.
+ *
+ * O que mudou estruturalmente: anúncios agora são agrupados em "Ad Groups"
+ * (por CATALOG, FAMILY ou ITEM) dentro de cada campanha — os endpoints de
+ * "ads" (anúncio individual) foram removidos, e no lugar deles a API expõe
+ * o nível de Ad Group (com as mesmas métricas + TACOS) e, dentro de cada Ad
+ * Group, o nível de item (com preço, buy box, logística, reputação etc.).
+ *
+ * Diferenças importantes em relação ao resto de `endpoints.ts`:
+ *  - Base de rota própria: `/advertising/...` (mesmo host `api.mercadolibre.com`).
+ *  - Exige o header `Api-Version` em toda chamada (1 para advertisers, 2 para
+ *    campanhas/ad groups/itens).
+ *  - A maioria das rotas de campanha/ad group agora exige `$ADVERTISER_SITE_ID`
+ *    (ex.: "MLB") no path, além ou no lugar do `advertiser_id` — cada
+ *    endpoint tem seu próprio formato de path, não são todos iguais (ver
+ *    comentário em cada função abaixo). Isso foi confirmado lendo a
+ *    documentação oficial diretamente, não é suposição.
+ *  - Não trabalha com o `ml_user_id` do seller diretamente — primeiro é
+ *    preciso descobrir o `advertiser_id` E o `site_id` (uma conta quase
+ *    sempre tem 1 advertiser por site/país) via `listAdvertisers`.
+ *  - A conta do seller precisa ter o produto de Publicidade habilitado no
+ *    Mercado Livre — se nunca usou Ads, `listAdvertisers` retorna lista
+ *    vazia, não erro.
+ *
+ * Se `consultar_campanhas`/`consultar_ad_groups` voltarem a dar 404/400
+ * inesperado no futuro, o primeiro passo é reconferir essa página de
+ * documentação antes de assumir bug no código — a Advertising API muda com
+ * mais frequência que o resto da API do ML.
  */
 
-// ---- Users ----
-export interface MlUser {
-  id: number;
-  nickname: string;
-  registration_date: string;
-  country_id: string;
-  seller_reputation?: {
-    level_id: string | null;
-    power_seller_status: string | null;
-    transactions: { completed: number; canceled: number; total: number };
-  };
-  status?: { site_status: string };
+const ADVERTISER_API_VERSION = "1";
+const ADS_API_VERSION = "2"; // campanhas, ad groups e itens
+
+function adsHeaders(version: string, extra?: Record<string, string>): Record<string, string> {
+  return { "Api-Version": version, ...extra };
 }
 
-export const getMe = (sellerName: string) => mlGet<MlUser>(sellerName, "/users/me");
-export const getUser = (sellerName: string, userId: string) => mlGet<MlUser>(sellerName, `/users/${userId}`);
-
-// ---- Items (anúncios) ----
-export interface MlItemSearchResult {
-  results: string[]; // IDs (MLB...)
-  paging: { total: number; offset: number; limit: number };
-  scroll_id?: string;
-}
-
-export async function searchAllItemIds(sellerName: string, userId: string, maxItems = 5000): Promise<string[]> {
-  const ids = await collect(
-    paginateScan<string>({ sellerName, path: `/users/${userId}/items/search`, maxItems }),
-    maxItems
-  );
-  return ids;
-}
-
-export interface MlItem {
-  id: string;
-  title: string;
-  status: string; // active, paused, closed, under_review, etc.
-  price: number;
-  currency_id: string;
-  available_quantity: number;
-  sold_quantity: number;
-  permalink: string;
-  category_id: string;
-  listing_type_id: string;
-  health?: number;
-  last_updated: string;
-  date_created: string;
-  shipping?: { free_shipping: boolean; logistic_type?: string };
-  attributes?: Array<{ id: string; name: string; value_name: string | null }>;
-}
-
-/** GET /items?ids=MLB1,MLB2,... (multiget, até 20 por chamada). */
-export async function getItemsMultiget(sellerName: string, itemIds: string[]): Promise<MlItem[]> {
-  const chunks: string[][] = [];
-  for (let i = 0; i < itemIds.length; i += 20) chunks.push(itemIds.slice(i, i + 20));
-
-  const out: MlItem[] = [];
-  for (const chunk of chunks) {
-    const res = await mlGet<Array<{ code: number; body: MlItem }>>(sellerName, "/items", {
-      query: { ids: chunk.join(",") },
-    });
-    for (const entry of res) {
-      if (entry.code === 200) out.push(entry.body);
-    }
+/** Serializa `filters` como os parâmetros `filters[chave]=valor` que a Advertising API espera. */
+function filterParams(filters?: Record<string, string | number | undefined>): Record<string, string | number | undefined> {
+  if (!filters) return {};
+  const out: Record<string, string | number | undefined> = {};
+  for (const [key, value] of Object.entries(filters)) {
+    if (value !== undefined) out[`filters[${key}]`] = value;
   }
   return out;
 }
 
-export const getItem = (sellerName: string, itemId: string) => mlGet<MlItem>(sellerName, `/items/${itemId}`);
+// ---- Advertisers ----
 
-export interface MlItemDescription {
-  plain_text: string;
-}
-export const getItemDescription = (sellerName: string, itemId: string) =>
-  mlGet<MlItemDescription>(sellerName, `/items/${itemId}/description`);
-
-// ---- Visitas ----
-export interface MlItemVisitsResult {
-  [itemId: string]: { total_visits?: number };
-}
-
-/** GET /items/visits?ids=... — visitas totais dos itens no período. */
-export async function getItemsVisits(
-  sellerName: string,
-  itemIds: string[],
-  dateFrom: string,
-  dateTo: string
-): Promise<Record<string, number>> {
-  const out: Record<string, number> = {};
-  const chunks: string[][] = [];
-  for (let i = 0; i < itemIds.length; i += 20) chunks.push(itemIds.slice(i, i + 20));
-
-  for (const chunk of chunks) {
-    const res = await mlGet<Array<{ item_id: string; total_visits: number }>>(sellerName, "/items/visits", {
-      query: { ids: chunk.join(","), date_from: dateFrom, date_to: dateTo },
-    });
-    for (const entry of res) out[entry.item_id] = entry.total_visits;
-  }
-  return out;
-}
-
-// ---- Orders (pedidos/vendas) ----
-export interface MlOrder {
-  id: number;
-  date_created: string;
-  date_closed: string | null;
-  status: string; // paid, cancelled, confirmed, payment_required, etc.
-  total_amount: number;
-  currency_id: string;
-  order_items: Array<{
-    item: { id: string; title: string; seller_sku?: string };
-    quantity: number;
-    unit_price: number;
-  }>;
-  buyer?: { id: number; nickname: string };
-  shipping?: { id: number };
-}
-
-export interface MlOrderSearchResult {
-  results: MlOrder[];
-  paging: { total: number; offset: number; limit: number };
-}
-
-export async function searchOrders(
-  sellerName: string,
-  userId: string,
-  params: { dateFrom: string; dateTo: string; offset?: number; limit?: number }
-): Promise<MlOrderSearchResult> {
-  return mlGet<MlOrderSearchResult>(sellerName, "/orders/search", {
-    query: {
-      seller: userId,
-      "order.date_created.from": params.dateFrom,
-      "order.date_created.to": params.dateTo,
-      offset: params.offset ?? 0,
-      limit: params.limit ?? 50,
-      sort: "date_desc",
-    },
-  });
-}
-
-export async function searchAllOrders(
-  sellerName: string,
-  userId: string,
-  params: { dateFrom: string; dateTo: string; maxOrders?: number }
-): Promise<MlOrder[]> {
-  const maxOrders = params.maxOrders ?? 2000;
-  const out: MlOrder[] = [];
-  let offset = 0;
-  const limit = 50;
-  // /orders/search não suporta scan; respeita teto de offset da API (paginamos até 1000 por consulta)
-  while (out.length < maxOrders) {
-    const page = await searchOrders(sellerName, userId, { ...params, offset, limit });
-    out.push(...page.results);
-    if (page.results.length < limit || offset + limit >= 1000) break;
-    offset += limit;
-  }
-  return out.slice(0, maxOrders);
-}
-
-// ---- Questions (perguntas) ----
-export interface MlQuestion {
-  id: number;
-  item_id: string;
-  status: string; // UNANSWERED, ANSWERED, BANNED, CLOSED_UNANSWERED
-  text: string;
-  date_created: string;
-  answer?: { text: string; date_created: string } | null;
-}
-
-export interface MlQuestionSearchResult {
-  questions: MlQuestion[];
-  total: number;
-}
-
-export async function searchQuestions(
-  sellerName: string,
-  userId: string,
-  params: { status?: string; offset?: number; limit?: number }
-): Promise<MlQuestionSearchResult> {
-  return mlGet<MlQuestionSearchResult>(sellerName, "/questions/search", {
-    query: {
-      seller_id: userId,
-      status: params.status,
-      offset: params.offset ?? 0,
-      limit: params.limit ?? 50,
-    },
-  });
-}
-
-/**
- * POST /answers/ — responde uma pergunta de comprador. Único endpoint de
- * ESCRITA neste arquivo (o resto de `endpoints.ts` é só leitura de
- * propósito) porque é simples e de baixo risco (não mexe em dinheiro nem em
- * estoque/preço) — mas ainda assim é uma ação pública e, até onde a
- * documentação oficial indica, sem endpoint de "desfazer". A tool que chama
- * isto (`responder_pergunta`, em engajamento.ts) usa o mesmo padrão de
- * prévia + confirmar=true das tools de escrita de anúncio.
- */
-export async function answerQuestion(sellerName: string, questionId: number | string, text: string): Promise<{ id: number }> {
-  return mlPost<{ id: number }>(sellerName, "/answers", { question_id: Number(questionId), text });
-}
-
-// ---- Shipments (envios) ----
-export interface MlShipment {
-  id: number;
-  status: string; // pending, handling, ready_to_ship, shipped, delivered, not_delivered, cancelled
-  substatus: string | null;
-  tracking_number: string | null;
-  date_created: string;
-  logistic_type?: string;
-}
-
-export const getShipment = (sellerName: string, shipmentId: number | string) =>
-  mlGet<MlShipment>(sellerName, `/shipments/${shipmentId}`);
-
-// ---- Reputation ----
-export interface MlReputation {
-  level_id: string | null;
-  power_seller_status: string | null;
-  transactions: {
-    total: number;
-    completed: number;
-    canceled: number;
-    period: string;
-    ratings: { positive: number; negative: number; neutral: number };
-  };
-  metrics?: {
-    claims?: { rate: number; value: number };
-    delayed_handling_time?: { rate: number; value: number };
-    cancellations?: { rate: number; value: number };
-  };
-}
-
-export const getUserReputation = (sellerName: string, userId: string) =>
-  mlGet<{ seller_reputation: MlReputation }>(sellerName, `/users/${userId}`, {
-    query: { attributes: "seller_reputation" },
-  });
-
-// ---- Promotions ----
-export interface MlPromotion {
-  id: string;
-  type: string;
-  status: string;
-  start_date?: string;
-  finish_date?: string;
-}
-
-export const listPromotions = (sellerName: string, userId: string) =>
-  mlGet<{ results: MlPromotion[] }>(sellerName, `/seller-promotions/users/${userId}`, {
-    query: { app_version: "v2" },
-  });
-
-// ---- Prices (histórico simplificado via item) ----
-export const getItemPrice = (sellerName: string, itemId: string) => getItem(sellerName, itemId);
-
-// ---- Marketplace search (pesquisa de mercado / concorrência) ----
-
-/**
- * GET /sites/{site_id}/search — a mesma busca pública que roda na caixa de
- * busca do site do Mercado Livre. Usamos o token do seller pra autenticar
- * (a API passou a exigir um access_token válido, mas não precisa ser o
- * token do dono dos anúncios encontrados — qualquer seller autenticado
- * pode pesquisar). Serve pra checar preço/posição da concorrência para um
- * termo ou categoria, sem depender de Product Ads estar habilitado.
- */
-export interface MlSearchResultItem {
-  id: string;
-  title: string;
-  price: number;
-  original_price?: number | null;
-  currency_id: string;
-  available_quantity: number;
-  sold_quantity: number;
-  condition: string; // new, used
-  permalink: string;
-  thumbnail?: string;
-  seller: { id: number; nickname?: string };
-  shipping?: { free_shipping: boolean };
-  official_store_id?: number | null;
-  tags?: string[]; // ex.: "good_quality_picture", "extended_warranty", "loyalty_discount_eligible"
-}
-
-export interface MlSearchResult {
+export interface MlAdvertiser {
+  advertiser_id: number;
+  advertiser_name?: string;
+  account_name?: string;
+  /** ID do site/país (ex.: "MLB") — necessário em quase todas as chamadas de campanha/ad group. */
   site_id: string;
-  paging: { total: number; offset: number; limit: number };
-  results: MlSearchResultItem[];
 }
 
-export async function searchMarketplace(
+export type MlAdsProduct = "PADS" | "DISPLAY" | "BADS";
+
+/**
+ * Descobre o(s) `advertiser_id`/`site_id` do seller para um produto de Ads.
+ * `PADS` = Product Ads (o que interessa para "campanhas de anúncios de produto").
+ * Lista vazia é normal para sellers que nunca configuraram Ads — não é erro.
+ * Único endpoint que NÃO mudou na migração de maio/2026.
+ */
+export async function listAdvertisers(sellerName: string, productId: MlAdsProduct = "PADS"): Promise<MlAdvertiser[]> {
+  const res = await mlGet<{ advertisers: MlAdvertiser[] }>(sellerName, "/advertising/advertisers", {
+    query: { product_id: productId },
+    headers: adsHeaders(ADVERTISER_API_VERSION),
+  });
+  return res.advertisers ?? [];
+}
+
+// ---- Campaigns ----
+
+/** Métricas disponíveis na listagem/busca de campanhas (nível campanha). */
+export const CAMPAIGN_METRICS = [
+  "clicks",
+  "prints", // impressões
+  "ctr",
+  "cost", // valor investido
+  "cpc",
+  "acos",
+  "cvr",
+  "roas",
+  "sov", // % de vendas por publicidade sobre vendas totais
+  "direct_amount",
+  "indirect_amount",
+  "total_amount",
+  "direct_units_quantity",
+  "indirect_units_quantity",
+  "units_quantity",
+  "direct_items_quantity",
+  "indirect_items_quantity",
+  "advertising_items_quantity",
+  "organic_units_quantity",
+  "organic_units_amount",
+  "organic_items_quantity",
+] as const;
+
+/** Métricas de "competitividade" (leilão) — só disponíveis no detalhe de UMA campanha, não na listagem. */
+export const CAMPAIGN_COMPETITIVIDADE_METRICS = [
+  "impression_share",
+  "top_impression_share",
+  "lost_impression_share_by_budget",
+  "lost_impression_share_by_ad_rank",
+  "acos_benchmark",
+] as const;
+
+export interface MlCampaignMetrics {
+  clicks?: number;
+  prints?: number;
+  ctr?: number;
+  cost?: number;
+  cpc?: number;
+  acos?: number;
+  cvr?: number;
+  roas?: number;
+  sov?: number;
+  direct_amount?: number;
+  indirect_amount?: number;
+  total_amount?: number;
+  direct_units_quantity?: number;
+  indirect_units_quantity?: number;
+  units_quantity?: number;
+  direct_items_quantity?: number;
+  indirect_items_quantity?: number;
+  advertising_items_quantity?: number;
+  organic_units_quantity?: number;
+  organic_units_amount?: number;
+  organic_items_quantity?: number;
+  // Só vêm quando pedidas no detalhe de uma campanha específica:
+  impression_share?: number;
+  top_impression_share?: number;
+  lost_impression_share_by_budget?: number;
+  lost_impression_share_by_ad_rank?: number;
+  acos_benchmark?: number;
+  [key: string]: number | undefined;
+}
+
+export interface MlCampaign {
+  id: number | string;
+  name: string;
+  status: string; // active, paused
+  budget?: number;
+  daily_budget?: number;
+  currency_id?: string;
+  strategy?: string; // PROFITABILITY, INCREASE, VISIBILITY
+  /** Alvo em ROAS — métrica padrão desde jan/2026 (substitui acos_target, que deixa de ser retornado a partir de 30/03/2026). */
+  roas_target?: number;
+  /** @deprecated substituído por roas_target — pode não vir mais na resposta. */
+  acos_target?: number;
+  date_created?: string;
+  last_updated?: string;
+  channel?: string; // marketplace
+  metrics?: MlCampaignMetrics;
+}
+
+export interface MlCampaignListResult {
+  paging: { total: number; offset: number; limit: number };
+  results: MlCampaign[];
+}
+
+/**
+ * Lista/busca campanhas de Product Ads de um advertiser, com métricas
+ * agregadas no período informado. `dateFrom`/`dateTo` no formato YYYY-MM-DD.
+ *
+ * Path confirmado na doc oficial (2026-09-04): note que o `site_id` vem
+ * ANTES de "advertisers" — diferente do path antigo (desativado) que não
+ * tinha site_id nenhum. "/search" no final agora é obrigatório.
+ */
+export async function listCampaigns(
   sellerName: string,
   siteId: string,
+  advertiserId: number | string,
   params: {
-    q?: string;
-    categoryId?: string;
+    dateFrom: string;
+    dateTo: string;
+    status?: "active" | "paused";
+    campaignIds?: string;
     offset?: number;
     limit?: number;
-    sort?: "relevance" | "price_asc" | "price_desc";
-    condition?: "new" | "used";
   }
-): Promise<MlSearchResult> {
-  return mlGet<MlSearchResult>(sellerName, `/sites/${siteId}/search`, {
+): Promise<MlCampaignListResult> {
+  return mlGet<MlCampaignListResult>(sellerName, `/advertising/${siteId}/advertisers/${advertiserId}/product_ads/campaigns/search`, {
     query: {
-      q: params.q,
-      category: params.categoryId,
+      date_from: params.dateFrom,
+      date_to: params.dateTo,
+      metrics: CAMPAIGN_METRICS.join(","),
+      metrics_summary: false, // não confiar nele: já vimos em produção somar a conta inteira, ignorando filtro — somamos na mão em campanhas.ts
       offset: params.offset ?? 0,
-      limit: params.limit ?? 20,
-      sort: params.sort && params.sort !== "relevance" ? params.sort : undefined,
-      condition: params.condition,
+      limit: params.limit ?? 50,
+      ...filterParams({ status: params.status, campaign_ids: params.campaignIds }),
     },
+    headers: adsHeaders(ADS_API_VERSION),
+  });
+}
+
+/**
+ * Detalhe + métricas (incluindo competitividade) de uma campanha específica.
+ *
+ * Path confirmado na doc oficial: aqui NÃO entra "advertisers/{advertiserId}"
+ * — é só site_id direto para o id da campanha. Path diferente do de listagem
+ * de propósito, não é inconsistência nossa.
+ */
+export async function getCampaign(
+  sellerName: string,
+  siteId: string,
+  campaignId: number | string,
+  params: { dateFrom: string; dateTo: string }
+): Promise<MlCampaign> {
+  return mlGet<MlCampaign>(sellerName, `/advertising/${siteId}/product_ads/campaigns/${campaignId}`, {
+    query: {
+      date_from: params.dateFrom,
+      date_to: params.dateTo,
+      metrics: [...CAMPAIGN_METRICS, ...CAMPAIGN_COMPETITIVIDADE_METRICS].join(","),
+    },
+    headers: adsHeaders(ADS_API_VERSION),
+  });
+}
+
+// ---- Ad Groups ----
+
+export type MlAdGroupType = "CATALOG" | "FAMILY" | "ITEM";
+
+export const AD_GROUP_METRICS = [
+  "clicks",
+  "prints",
+  "cost",
+  "cpc",
+  "ctr",
+  "direct_amount",
+  "indirect_amount",
+  "total_amount",
+  "direct_units_quantity",
+  "indirect_units_quantity",
+  "units_quantity",
+  "direct_items_quantity",
+  "indirect_items_quantity",
+  "advertising_items_quantity",
+  "organic_units_quantity",
+  "organic_units_amount",
+  "organic_items_quantity",
+  "acos",
+  "sov",
+  "roas",
+  "cvr",
+  "tacos", // só existe a partir do nível de Ad Group pra baixo, não em campanha
+] as const;
+
+export interface MlAdGroupMetrics {
+  clicks?: number;
+  prints?: number;
+  cost?: number;
+  cpc?: number;
+  ctr?: number;
+  direct_amount?: number;
+  indirect_amount?: number;
+  total_amount?: number;
+  direct_units_quantity?: number;
+  indirect_units_quantity?: number;
+  units_quantity?: number;
+  direct_items_quantity?: number;
+  indirect_items_quantity?: number;
+  advertising_items_quantity?: number;
+  organic_units_quantity?: number;
+  organic_units_amount?: number;
+  organic_items_quantity?: number;
+  acos?: number;
+  sov?: number;
+  roas?: number;
+  cvr?: number;
+  tacos?: number;
+  [key: string]: number | undefined;
+}
+
+export interface MlAdGroup {
+  id: number; // este é o ad_group_id usado no resto das chamadas
+  ad_group_external_id?: string; // parent_id (catálogo), family_id (user product) ou item_id (item tradicional)
+  ad_group_type?: MlAdGroupType;
+  status: string;
+  campaign_id: number | string;
+  advertiser_id?: number;
+  title?: string;
+  domain_id?: string;
+  thumbnail?: string;
+  date_created?: string;
+  metrics?: MlAdGroupMetrics;
+}
+
+export interface MlAdGroupSearchResult {
+  paging: { total: number; offset: number; limit: number };
+  results: MlAdGroup[];
+  metrics_summary?: MlAdGroupMetrics; // cuidado: ver nota sobre metrics_summary em listCampaigns
+}
+
+/**
+ * Localiza o(s) `ad_group_id` a partir de um ou mais `item_id` (SKU do
+ * Mercado Livre, ex. "MLB123456789"). Não precisa de período — é uma busca
+ * de identidade, não de métricas.
+ */
+export async function findAdGroupsByItems(
+  sellerName: string,
+  siteId: string,
+  advertiserId: number | string,
+  itemIds: string[]
+): Promise<MlAdGroup[]> {
+  const res = await mlGet<MlAdGroupSearchResult>(sellerName, `/advertising/${siteId}/advertisers/${advertiserId}/product_ads/ad_groups/search`, {
+    query: filterParams({ item_ids: itemIds.join(",") }),
+    headers: adsHeaders(ADS_API_VERSION),
+  });
+  return res.results ?? [];
+}
+
+/**
+ * Lista/busca Ad Groups de um advertiser, com métricas, no período
+ * informado — o equivalente, no novo modelo, a "todas as campanhas com
+ * métricas", só que num nível mais granular (por catálogo/família/item).
+ * Aceita filtro por campanha (`filters.campaignId`) para restringir a uma
+ * campanha só.
+ */
+export async function listAdGroupsByAdvertiser(
+  sellerName: string,
+  siteId: string,
+  advertiserId: number | string,
+  params: {
+    dateFrom: string;
+    dateTo: string;
+    limit?: number;
+    offset?: number;
+    filters?: { campaignId?: string; status?: string; q?: string };
+  }
+): Promise<MlAdGroupSearchResult> {
+  return mlGet<MlAdGroupSearchResult>(sellerName, `/advertising/${siteId}/advertisers/${advertiserId}/product_ads/ad_groups/search`, {
+    query: {
+      date_from: params.dateFrom,
+      date_to: params.dateTo,
+      limit: params.limit ?? 50,
+      offset: params.offset ?? 0,
+      metrics: AD_GROUP_METRICS.join(",").toUpperCase(),
+      metrics_summary: false, // mesma ressalva de listCampaigns — não confiar, somar na mão
+      ...filterParams({
+        campaigns: params.filters?.campaignId,
+        statuses: params.filters?.status,
+        q: params.filters?.q,
+      }),
+    },
+    headers: adsHeaders(ADS_API_VERSION),
+  });
+}
+
+/** Detalhe + métricas de UM Ad Group específico. */
+export async function getAdGroup(
+  sellerName: string,
+  siteId: string,
+  adGroupId: number | string,
+  params: { dateFrom: string; dateTo: string }
+): Promise<MlAdGroup> {
+  return mlGet<MlAdGroup>(sellerName, `/advertising/${siteId}/product_ads/ad_groups/${adGroupId}`, {
+    query: {
+      date_from: params.dateFrom,
+      date_to: params.dateTo,
+      metrics: AD_GROUP_METRICS.join(","),
+    },
+    headers: adsHeaders(ADS_API_VERSION),
+  });
+}
+
+// ---- Itens (anúncios individuais dentro de um Ad Group) ----
+
+export interface MlAdItem {
+  item_id: string;
+  campaign_id: number | string;
+  ad_group_id: number;
+  price?: number;
+  title: string;
+  status: string;
+  has_discount?: boolean;
+  catalog_listing?: boolean;
+  logistic_type?: string;
+  listing_type_id?: string;
+  domain_id?: string;
+  buy_box_winner?: boolean;
+  channel?: string;
+  condition?: string;
+  current_level?: string; // reputação
+  deferred_stock?: boolean;
+  thumbnail?: string;
+  permalink?: string;
+  image_quality?: string;
+  family_id?: number | string;
+  family_name?: string;
+  user_product_id?: string;
+  user_product_name?: string;
+  metrics?: MlAdGroupMetrics;
+}
+
+export interface MlAdItemListResult {
+  paging: { total: number; offset: number; limit: number };
+  results: MlAdItem[];
+}
+
+/** Lista os itens (anúncios) que pertencem a um Ad Group, com métricas por item. */
+export async function listAdGroupItems(
+  sellerName: string,
+  siteId: string,
+  adGroupId: number | string,
+  params: { dateFrom: string; dateTo: string }
+): Promise<MlAdItemListResult> {
+  return mlGet<MlAdItemListResult>(sellerName, `/advertising/${siteId}/product_ads/ad_groups/${adGroupId}/ads`, {
+    query: {
+      date_from: params.dateFrom,
+      date_to: params.dateTo,
+      metrics: AD_GROUP_METRICS.join(","),
+    },
+    headers: adsHeaders(ADS_API_VERSION),
   });
 }
