@@ -8,7 +8,7 @@ import {
   consultarPrecoTool,
 } from "./anuncios.js";
 import { consultarVendasTool, consultarPedidosTool } from "./vendas.js";
-import { consultarVisitasTool, consultarPerguntasTool } from "./engajamento.js";
+import { consultarVisitasTool, consultarPerguntasTool, responderPerguntaTool } from "./engajamento.js";
 import { consultarEnviosTool, consultarReputacaoTool, consultarPromocoesTool } from "./logistica.js";
 import { buscarProdutosSemVendasTool, compararPeriodosTool, analisarQuedaVendasTool } from "./analises.js";
 import { diagnosticarIntegracaoTool } from "./diagnostico.js";
@@ -21,6 +21,8 @@ import {
   buscarAdGroupPorSkuTool,
 } from "./campanhas.js";
 import { criarAnuncioTool, editarAnuncioTool } from "./escrita.js";
+import { pesquisarMercadoTool, compararConcorrenciaTool } from "./mercado.js";
+import { gerarRelatorioDesempenhoTool } from "./relatorio.js";
 
 /**
  * Registro central de todas as tools MCP expostas pelo Enginne (V2 — leitura
@@ -46,6 +48,7 @@ export const allTools: ToolDefinition<any>[] = [
   consultarPedidosTool,
   consultarVisitasTool,
   consultarPerguntasTool,
+  responderPerguntaTool,
   consultarEnviosTool,
   consultarReputacaoTool,
   consultarPromocoesTool,
@@ -61,4 +64,7 @@ export const allTools: ToolDefinition<any>[] = [
   diagnosticarIntegracaoTool,
   criarAnuncioTool,
   editarAnuncioTool,
+  pesquisarMercadoTool,
+  compararConcorrenciaTool,
+  gerarRelatorioDesempenhoTool,
 ];
