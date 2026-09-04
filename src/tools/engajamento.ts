@@ -98,4 +98,7 @@ export const responderPerguntaTool: ToolDefinition<typeof responderPerguntaSchem
 
       return ok(`Resposta publicada na pergunta ${perguntaId} (resposta ${res.id}):\n"${texto}"`, { answerId: res.id, perguntaId, texto });
     } catch (err) {
-      return
+      return toErrorResult(err, "responder_pergunta");
+    }
+  },
+};
