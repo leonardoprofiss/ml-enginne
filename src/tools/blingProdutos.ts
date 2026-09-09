@@ -88,30 +88,107 @@ export const listarProdutosBlingTool: ToolDefinition<typeof listarProdutosSchema
 const editarProdutoSchema = {
   seller: z.string().describe("Nome interno da conta Bling"),
   produtoId: z.string().describe("ID do produto a editar"),
-  nome: z.string().min(1).optional().describe("Novo nome do produto (opcional)"),
+  nome: z.string().min(1).optional().describe("Novo nome/título do produto (opcional)"),
   preco: z.number().positive().optional().describe("Novo preço (opcional)"),
   situacao: z.enum(["ativo", "inativo"]).optional().describe("Nova situação do produto (opcional)"),
+  ncm: z
+    .string()
+    .optional()
+    .describe('Novo NCM (opcional), ex.: "3305.10.00". Passe string vazia "" para limpar o NCM cadastrado.'),
+  gtin: z.string().optional().describe("Novo código de barras/EAN (GTIN) do produto (opcional)"),
+  marca: z.string().optional().describe("Nova marca do produto (opcional)"),
+  pesoLiquido: z.number().nonnegative().optional().describe("Novo peso líquido em kg (opcional)"),
+  pesoBruto: z.number().nonnegative().optional().describe("Novo peso bruto em kg (opcional)"),
+  largura: z.number().nonnegative().optional().describe("Nova largura em cm (opcional)"),
+  altura: z.number().nonnegative().optional().describe("Nova altura em cm (opcional)"),
+  profundidade: z.number().nonnegative().optional().describe("Nova profundidade/comprimento em cm (opcional)"),
+  descricaoCurta: z.string().optional().describe("Nova descrição curta do produto (opcional) — substitui a atual inteira"),
+  descricaoComplementar: z
+    .string()
+    .optional()
+    .describe("Nova descrição complementar/detalhada do produto (opcional) — substitui a atual inteira"),
+  camposExtras: z
+    .record(z.unknown())
+    .optional()
+    .describe(
+      "Qualquer outro campo aceito pela API do Bling em PUT /produtos/{id} que não tenha um parâmetro dedicado acima (ex.: {\"unidade\": \"CX\"} ou {\"tributacao\": {\"origem\": 1}}). Objetos são mesclados nível a nível com o produto atual, não sobrescrevem o objeto inteiro — exceto quando você mesmo passar um objeto aninhado completo. Use com cautela: não há prévia campo-a-campo para o conteúdo deste objeto além do JSON bruto mostrado na prévia."
+    ),
   confirmar: z.boolean().optional().describe("Só aplica de fato quando true. Default false: mostra prévia."),
 };
 
 export const editarProdutoBlingTool: ToolDefinition<typeof editarProdutoSchema> = {
   name: "editar_produto_bling",
   title: "Editar produto (Bling)",
-  description: "Edita nome, preço e/ou situação. Por padrão só mostra prévia — chame com confirmar=true para aplicar.",
+  description:
+    "Edita nome, preço, situação, NCM, GTIN, marca, peso, dimensões, descrições e/ou qualquer outro campo do Bling (via camposExtras). Só altera os campos informados — os demais ficam como estão. Por padrão só mostra prévia — chame com confirmar=true para aplicar.",
   inputSchema: editarProdutoSchema,
-  handler: async ({ seller, produtoId, nome, preco, situacao, confirmar }) => {
+  handler: async ({
+    seller,
+    produtoId,
+    nome,
+    preco,
+    situacao,
+    ncm,
+    gtin,
+    marca,
+    pesoLiquido,
+    pesoBruto,
+    largura,
+    altura,
+    profundidade,
+    descricaoCurta,
+    descricaoComplementar,
+    camposExtras,
+    confirmar,
+  }) => {
     try {
-      const hasChange = [nome, preco, situacao].some((v) => v !== undefined);
-      if (!hasChange) return errorResult("Informe ao menos um campo para alterar (nome, preco ou situacao).");
+      const hasChange = [
+        nome,
+        preco,
+        situacao,
+        ncm,
+        gtin,
+        marca,
+        pesoLiquido,
+        pesoBruto,
+        largura,
+        altura,
+        profundidade,
+        descricaoCurta,
+        descricaoComplementar,
+        camposExtras,
+      ].some((v) => v !== undefined);
+      if (!hasChange) {
+        return errorResult(
+          "Informe ao menos um campo para alterar (nome, preco, situacao, ncm, gtin, marca, pesoLiquido, pesoBruto, largura, altura, profundidade, descricaoCurta, descricaoComplementar ou camposExtras)."
+        );
+      }
 
       const current = await blingGet<{ data: BlingProduto }>(seller, `/produtos/${produtoId}`);
       const p = current.data;
+      const tributacaoAtual = (p.tributacao as Record<string, unknown> | undefined) ?? {};
+      const dimensoesAtual = (p.dimensoes as Record<string, unknown> | undefined) ?? {};
 
       const diffLines: string[] = [];
       if (nome !== undefined && nome !== p.nome) diffLines.push(`Nome: "${p.nome}" -> "${nome}"`);
       if (preco !== undefined && preco !== p.preco) diffLines.push(`Preço: ${moneyBr(p.preco)} -> ${moneyBr(preco)}`);
       const situacaoBling = situacao === "ativo" ? "Ativo" : situacao === "inativo" ? "Inativo" : undefined;
       if (situacaoBling !== undefined && situacaoBling !== p.situacao) diffLines.push(`Situação: ${p.situacao} -> ${situacaoBling}`);
+      if (ncm !== undefined && ncm !== tributacaoAtual.ncm) {
+        diffLines.push(`NCM: "${(tributacaoAtual.ncm as string) || "(vazio)"}" -> "${ncm || "(vazio)"}"`);
+      }
+      if (gtin !== undefined && gtin !== p.gtin) diffLines.push(`GTIN: "${(p.gtin as string) || "(vazio)"}" -> "${gtin}"`);
+      if (marca !== undefined && marca !== p.marca) diffLines.push(`Marca: "${(p.marca as string) || "(vazia)"}" -> "${marca}"`);
+      if (pesoLiquido !== undefined && pesoLiquido !== p.pesoLiquido) diffLines.push(`Peso líquido: ${p.pesoLiquido ?? 0}kg -> ${pesoLiquido}kg`);
+      if (pesoBruto !== undefined && pesoBruto !== p.pesoBruto) diffLines.push(`Peso bruto: ${p.pesoBruto ?? 0}kg -> ${pesoBruto}kg`);
+      if (largura !== undefined && largura !== dimensoesAtual.largura) diffLines.push(`Largura: ${dimensoesAtual.largura ?? 0}cm -> ${largura}cm`);
+      if (altura !== undefined && altura !== dimensoesAtual.altura) diffLines.push(`Altura: ${dimensoesAtual.altura ?? 0}cm -> ${altura}cm`);
+      if (profundidade !== undefined && profundidade !== dimensoesAtual.profundidade)
+        diffLines.push(`Profundidade: ${dimensoesAtual.profundidade ?? 0}cm -> ${profundidade}cm`);
+      if (descricaoCurta !== undefined) diffLines.push(`Descrição curta: substituída (${descricaoCurta.length} caractere(s) novo(s))`);
+      if (descricaoComplementar !== undefined)
+        diffLines.push(`Descrição complementar: substituída (${descricaoComplementar.length} caractere(s) novo(s))`);
+      if (camposExtras !== undefined) diffLines.push(`Campos extras: ${JSON.stringify(camposExtras)}`);
 
       if (diffLines.length === 0) {
         return ok(`Nenhuma mudança real: os valores já são iguais aos atuais do produto ${produtoId}.`, { noop: true, current: p });
@@ -124,12 +201,31 @@ export const editarProdutoBlingTool: ToolDefinition<typeof editarProdutoSchema> 
         );
       }
 
-      const updated = await blingPut<{ data: BlingProduto }>(seller, `/produtos/${produtoId}`, {
+      const payload: Record<string, unknown> = {
         ...p,
         nome: nome ?? p.nome,
         preco: preco ?? p.preco,
         situacao: situacaoBling ?? p.situacao,
-      });
+        gtin: gtin ?? p.gtin,
+        marca: marca ?? p.marca,
+        pesoLiquido: pesoLiquido ?? p.pesoLiquido,
+        pesoBruto: pesoBruto ?? p.pesoBruto,
+        descricaoCurta: descricaoCurta ?? p.descricaoCurta,
+        descricaoComplementar: descricaoComplementar ?? p.descricaoComplementar,
+        tributacao: {
+          ...tributacaoAtual,
+          ncm: ncm ?? tributacaoAtual.ncm,
+        },
+        dimensoes: {
+          ...dimensoesAtual,
+          largura: largura ?? dimensoesAtual.largura,
+          altura: altura ?? dimensoesAtual.altura,
+          profundidade: profundidade ?? dimensoesAtual.profundidade,
+        },
+        ...camposExtras,
+      };
+
+      const updated = await blingPut<{ data: BlingProduto }>(seller, `/produtos/${produtoId}`, payload);
 
       return ok(`Produto ${produtoId} atualizado:\n${diffLines.join("\n")}`, { produto: updated.data, applied: diffLines });
     } catch (err) {
