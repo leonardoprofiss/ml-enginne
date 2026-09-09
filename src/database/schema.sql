@@ -40,3 +40,31 @@ CREATE TABLE IF NOT EXISTS audit_log (
 
 CREATE INDEX IF NOT EXISTS idx_audit_log_seller ON audit_log(seller_name);
 CREATE INDEX IF NOT EXISTS idx_audit_log_created ON audit_log(created_at);
+
+-- Contas Bling conectadas (mesmo shape de "sellers", mas para o Bling).
+CREATE TABLE IF NOT EXISTS bling_sellers (
+  id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+  seller_name         TEXT NOT NULL UNIQUE,     -- nome interno do cliente, ex: "oficinal_farmacia"
+  bling_user_id       TEXT UNIQUE,               -- id da conta Bling (preenchido após o grant)
+  access_token_enc    TEXT,                      -- cifrado (AES-256-GCM) — nunca texto plano
+  refresh_token_enc   TEXT,                      -- cifrado (AES-256-GCM) — nunca texto plano
+  scope               TEXT,
+  token_expires_at    TEXT,                      -- ISO 8601 (UTC)
+  authorized_at       TEXT,                      -- ISO 8601 (UTC) — data da autorização OAuth inicial
+  status              TEXT NOT NULL DEFAULT 'pending', -- pending | active | expired | revoked | error
+  last_refreshed_at   TEXT,
+  last_error          TEXT,
+  created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+
+-- Estado efêmero do fluxo OAuth (state) entre /oauth/bling/start e
+-- /oauth/bling/callback. Tabela separada da do ML (oauth_pending) porque o
+-- Bling não usa PKCE (não tem code_verifier) — só state.
+CREATE TABLE IF NOT EXISTS bling_oauth_pending (
+  state               TEXT PRIMARY KEY,
+  seller_name         TEXT NOT NULL,
+  redirect_uri        TEXT NOT NULL,
+  created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  expires_at          TEXT NOT NULL
+);
