@@ -15,6 +15,13 @@ import {
   getSellerByName,
 } from "../database/sellersRepo.js";
 import { startAuthorization, exchangeCodeForTokens, OAuthError } from "../auth/oauth.js";
+import { startBlingAuthorization, exchangeBlingCodeForTokens, BlingOAuthError } from "../auth/oauthBling.js";
+import {
+  ensureBlingSellerPlaceholder,
+  consumeBlingPendingAuthorization,
+  saveBlingTokens,
+  markBlingSellerError,
+} from "../database/blingSellersRepo.js";
 
 const log = childLogger("http-server");
 
@@ -109,6 +116,68 @@ app.get("/oauth/callback", async (req, res) => {
     recordAudit(pending.seller_name, "oauth_error", message);
     log.error({ seller: pending.seller_name, err: message }, "falha ao trocar code por token");
     res.status(500).send(renderHtml("Falha na autorização", message));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// /oauth/bling/start — inicia o fluxo de autorização de UMA conta Bling.
+// Mesmo padrão do /oauth/start (Mercado Livre): um humano abre esta URL no
+// navegador para fazer login/consentimento no Bling.
+// ---------------------------------------------------------------------------
+app.get("/oauth/bling/start", (req, res) => {
+  const sellerName = String(req.query.seller ?? "").trim();
+  if (!sellerName || !/^[a-z0-9_-]+$/i.test(sellerName)) {
+    res.status(400).send("Parâmetro ?seller=nome_interno é obrigatório (letras, números, - e _ apenas).");
+    return;
+  }
+  try {
+    ensureBlingSellerPlaceholder(sellerName);
+    const url = startBlingAuthorization(sellerName);
+    res.redirect(url);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).send(renderHtml("Bling não configurado", message));
+  }
+});
+
+// ---------------------------------------------------------------------------
+// /oauth/bling/callback — o Bling redireciona o navegador para cá com
+// ?code=...&state=.... Esta é a MESMA URL que deve estar cadastrada como
+// "Link de redirecionamento" no app criado em developer.bling.com.br.
+// ---------------------------------------------------------------------------
+app.get("/oauth/bling/callback", async (req, res) => {
+  const { code, state, error, error_description } = req.query as Record<string, string | undefined>;
+
+  if (error) {
+    res.status(400).send(renderHtml("Autorização cancelada", `O Bling retornou: ${error} — ${error_description ?? ""}`));
+    return;
+  }
+  if (!code || !state) {
+    res.status(400).send(renderHtml("Requisição inválida", "Parâmetros code/state ausentes."));
+    return;
+  }
+
+  const pending = consumeBlingPendingAuthorization(state);
+  if (!pending) {
+    res
+      .status(400)
+      .send(renderHtml("Sessão expirada", "O link de autorização expirou ou já foi usado. Gere um novo com /oauth/bling/start?seller=NOME."));
+    return;
+  }
+
+  try {
+    const tokens = await exchangeBlingCodeForTokens({ code });
+    saveBlingTokens(pending.seller_name, tokens);
+    res.send(
+      renderHtml(
+        "Conta Bling conectada!",
+        `A conta "${pending.seller_name}" foi autorizada com sucesso no Bling e já pode ser consultada pelo Claude. Você pode fechar esta janela.`
+      )
+    );
+  } catch (err) {
+    const message = err instanceof BlingOAuthError ? err.message : err instanceof Error ? err.message : String(err);
+    markBlingSellerError(pending.seller_name, message);
+    res.status(500).send(renderHtml("Falha na autorização Bling", message));
   }
 });
 
