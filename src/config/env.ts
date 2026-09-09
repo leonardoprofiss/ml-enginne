@@ -25,6 +25,16 @@ const envSchema = z.object({
   ML_AUTH_DOMAIN: z.string().default("auth.mercadolivre.com.br"),
   ML_API_BASE_URL: z.string().url().default("https://api.mercadolibre.com"),
 
+  // Credenciais da aplicação Bling (uma aplicação, N contas/sellers).
+  // Opcionais por enquanto: o servidor continua subindo normalmente mesmo
+  // sem elas configuradas — só as rotas /oauth/bling/* e as tools de Bling
+  // vão falhar com uma mensagem clara se alguém tentar usá-las sem essas
+  // variáveis definidas.
+  BLING_CLIENT_ID: z.string().optional(),
+  BLING_CLIENT_SECRET: z.string().optional(),
+  BLING_AUTH_DOMAIN: z.string().default("https://www.bling.com.br/Api/v3/oauth"),
+  BLING_API_BASE_URL: z.string().url().default("https://api.bling.com.br/Api/v3"),
+
   // Chave mestra usada para cifrar (AES-256-GCM) access_token/refresh_token
   // em repouso no banco. Deve ter 32 bytes quando decodificada de base64.
   // Gerar com: openssl rand -base64 32
