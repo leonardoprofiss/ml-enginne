@@ -2,17 +2,20 @@ import { z } from "zod";
 import { ok, errorResult, toErrorResult, type ToolDefinition } from "./types.js";
 import { blingGet, blingPut } from "../bling/client.js";
 
-interface BlingProduto {
+interface BlingProduto extends Record<string, unknown> {
   id: number;
   nome: string;
   codigo?: string;
   preco?: number;
   situacao?: string;
-  estoque?: { saldoVirtualTotal?: number };
 }
 
 function moneyBr(n: number | undefined): string {
   return n === undefined ? "(não informado)" : `R$ ${n.toFixed(2)}`;
+}
+
+function formatarProdutoCompleto(p: BlingProduto): string {
+  return JSON.stringify(p, null, 2);
 }
 
 const consultarProdutoSchema = {
@@ -23,16 +26,13 @@ const consultarProdutoSchema = {
 export const consultarProdutoBlingTool: ToolDefinition<typeof consultarProdutoSchema> = {
   name: "consultar_produto_bling",
   title: "Consultar produto (Bling)",
-  description: "Detalha um produto específico cadastrado no Bling.",
+  description: "Detalha um produto específico cadastrado no Bling, com TODOS os campos disponíveis.",
   inputSchema: consultarProdutoSchema,
   handler: async ({ seller, produtoId }) => {
     try {
       const produto = await blingGet<{ data: BlingProduto }>(seller, `/produtos/${produtoId}`);
       const p = produto.data;
-      return ok(
-        `${p.nome} (ID ${p.id})\nCódigo: ${p.codigo ?? "(sem código)"} | Preço: ${moneyBr(p.preco)} | Situação: ${p.situacao ?? "?"} | Estoque: ${p.estoque?.saldoVirtualTotal ?? "?"}`,
-        { produto: p }
-      );
+      return ok(`${p.nome} (ID ${p.id}) — todos os campos:\n\n${formatarProdutoCompleto(p)}`, { produto: p });
     } catch (err) {
       return toErrorResult(err, "consultar_produto_bling");
     }
@@ -43,23 +43,42 @@ const listarProdutosSchema = {
   seller: z.string().describe("Nome interno da conta Bling"),
   pesquisa: z.string().optional().describe("Filtro por nome/código do produto (opcional)"),
   limite: z.number().int().positive().max(100).optional().describe("Máximo de produtos a retornar (default 50)"),
+  detalhado: z
+    .boolean()
+    .optional()
+    .describe("Se true, busca todos os campos de cada produto (mais lento). Default false: campos básicos."),
 };
 
 export const listarProdutosBlingTool: ToolDefinition<typeof listarProdutosSchema> = {
   name: "listar_produtos_bling",
   title: "Listar produtos (Bling)",
-  description: "Lista produtos cadastrados no Bling.",
+  description: "Lista produtos do Bling. Com detalhado=true, busca TODOS os campos de cada um.",
   inputSchema: listarProdutosSchema,
-  handler: async ({ seller, pesquisa, limite }) => {
+  handler: async ({ seller, pesquisa, limite, detalhado }) => {
     try {
       const resp = await blingGet<{ data: BlingProduto[] }>(seller, "/produtos", {
         criterio: pesquisa,
         limite: limite ?? 50,
       });
-      const linhas = resp.data.map(
-        (p) => `- ${p.nome} (ID ${p.id}) | ${p.codigo ?? "sem código"} | ${moneyBr(p.preco)} | estoque ${p.estoque?.saldoVirtualTotal ?? "?"}`
-      );
-      return ok(`${resp.data.length} produto(s) encontrado(s):\n${linhas.join("\n")}`, { produtos: resp.data });
+
+      if (!detalhado) {
+        const linhas = resp.data.map(
+          (p) => `- ${p.nome} (ID ${p.id}) | ${p.codigo ?? "sem código"} | ${moneyBr(p.preco)} | situação ${p.situacao ?? "?"}`
+        );
+        return ok(
+          `${resp.data.length} produto(s) encontrado(s) (campos básicos — use detalhado=true para ver tudo):\n${linhas.join("\n")}`,
+          { produtos: resp.data }
+        );
+      }
+
+      const completos: BlingProduto[] = [];
+      for (const item of resp.data) {
+        const detalhe = await blingGet<{ data: BlingProduto }>(seller, `/produtos/${item.id}`);
+        completos.push(detalhe.data);
+      }
+
+      const blocos = completos.map((p) => `${p.nome} (ID ${p.id}):\n${formatarProdutoCompleto(p)}`);
+      return ok(`${completos.length} produto(s), com todos os campos:\n\n${blocos.join("\n\n---\n\n")}`, { produtos: completos });
     } catch (err) {
       return toErrorResult(err, "listar_produtos_bling");
     }
@@ -78,7 +97,7 @@ const editarProdutoSchema = {
 export const editarProdutoBlingTool: ToolDefinition<typeof editarProdutoSchema> = {
   name: "editar_produto_bling",
   title: "Editar produto (Bling)",
-  description: "Edita nome, preço e/ou situação de um produto existente no Bling. Por padrão só mostra prévia — chame com confirmar=true para aplicar.",
+  description: "Edita nome, preço e/ou situação. Por padrão só mostra prévia — chame com confirmar=true para aplicar.",
   inputSchema: editarProdutoSchema,
   handler: async ({ seller, produtoId, nome, preco, situacao, confirmar }) => {
     try {
@@ -115,6 +134,54 @@ export const editarProdutoBlingTool: ToolDefinition<typeof editarProdutoSchema> 
       return ok(`Produto ${produtoId} atualizado:\n${diffLines.join("\n")}`, { produto: updated.data, applied: diffLines });
     } catch (err) {
       return toErrorResult(err, "editar_produto_bling");
+    }
+  },
+};
+
+const buscarSemNcmSchema = {
+  seller: z.string().describe("Nome interno da conta Bling"),
+  maxPaginas: z.number().int().positive().max(50).optional().describe("Máximo de páginas a varrer (100 produtos por página). Default 20."),
+};
+
+export const buscarProdutosSemNcmBlingTool: ToolDefinition<typeof buscarSemNcmSchema> = {
+  name: "buscar_produtos_bling_sem_ncm",
+  title: "Buscar produtos sem NCM (Bling)",
+  description: "Varre o catálogo inteiro do Bling e retorna os produtos sem NCM cadastrado.",
+  inputSchema: buscarSemNcmSchema,
+  handler: async ({ seller, maxPaginas }) => {
+    try {
+      const limitePaginas = maxPaginas ?? 20;
+      const semNcm: BlingProduto[] = [];
+      let totalVarrido = 0;
+
+      for (let pagina = 1; pagina <= limitePaginas; pagina++) {
+        const resp = await blingGet<{ data: BlingProduto[] }>(seller, "/produtos", { pagina, limite: 100 });
+        if (!resp.data || resp.data.length === 0) break;
+
+        totalVarrido += resp.data.length;
+        for (const p of resp.data) {
+          let ncm = p.ncm as string | undefined;
+          if (ncm === undefined) {
+            const detalhe = await blingGet<{ data: BlingProduto }>(seller, `/produtos/${p.id}`);
+            ncm = detalhe.data.ncm as string | undefined;
+          }
+          if (!ncm || String(ncm).trim() === "") semNcm.push(p);
+        }
+
+        if (resp.data.length < 100) break;
+      }
+
+      if (semNcm.length === 0) {
+        return ok(`Nenhum produto sem NCM encontrado (${totalVarrido} produto(s) verificado(s)).`, { produtos: [], totalVarrido });
+      }
+
+      const linhas = semNcm.map((p) => `- ${p.nome} (ID ${p.id}) | código ${p.codigo ?? "sem código"}`);
+      return ok(`${semNcm.length} produto(s) sem NCM, de ${totalVarrido} verificado(s):\n${linhas.join("\n")}`, {
+        produtos: semNcm,
+        totalVarrido,
+      });
+    } catch (err) {
+      return toErrorResult(err, "buscar_produtos_bling_sem_ncm");
     }
   },
 };
