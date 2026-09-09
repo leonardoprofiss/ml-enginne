@@ -27,21 +27,9 @@ import {
   consultarProdutoBlingTool,
   listarProdutosBlingTool,
   editarProdutoBlingTool,
+  buscarProdutosSemNcmBlingTool,
 } from "./blingProdutos.js";
 
-/**
- * Registro central de todas as tools MCP expostas pelo Enginne (V2 — leitura
- * + campanhas de Ads + escrita de anúncios + tools de Bling). Adicionar uma
- * tool nova = criar o ToolDefinition no módulo certo e listar aqui.
- * src/server/mcpServer.ts itera esta lista e chama server.registerTool()
- * para cada uma — nenhum outro lugar do código precisa saber quantas tools
- * existem.
- *
- * As tools de escrita (criarAnuncioTool, editarAnuncioTool) exigem que o
- * seller tenha reautorizado com escopo "write" (ver auth/oauth.ts) — sellers
- * autorizados só na V1 (somente "read") recebem erro 403 da ML até rodar
- * `npm run oauth:add-seller` de novo para esse seller.
- */
 export const allTools: ToolDefinition<any>[] = [
   listarContasTool,
   consultarSellerTool,
@@ -76,4 +64,5 @@ export const allTools: ToolDefinition<any>[] = [
   consultarProdutoBlingTool,
   listarProdutosBlingTool,
   editarProdutoBlingTool,
+  buscarProdutosSemNcmBlingTool,
 ];
