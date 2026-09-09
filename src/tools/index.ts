@@ -23,13 +23,19 @@ import {
 import { criarAnuncioTool, editarAnuncioTool } from "./escrita.js";
 import { pesquisarMercadoTool, compararConcorrenciaTool } from "./mercado.js";
 import { gerarRelatorioDesempenhoTool } from "./relatorio.js";
+import {
+  consultarProdutoBlingTool,
+  listarProdutosBlingTool,
+  editarProdutoBlingTool,
+} from "./blingProdutos.js";
 
 /**
  * Registro central de todas as tools MCP expostas pelo Enginne (V2 — leitura
- * + campanhas de Ads + escrita de anúncios). Adicionar uma tool nova = criar
- * o ToolDefinition no módulo certo e listar aqui. src/server/mcpServer.ts
- * itera esta lista e chama server.registerTool() para cada uma — nenhum
- * outro lugar do código precisa saber quantas tools existem.
+ * + campanhas de Ads + escrita de anúncios + tools de Bling). Adicionar uma
+ * tool nova = criar o ToolDefinition no módulo certo e listar aqui.
+ * src/server/mcpServer.ts itera esta lista e chama server.registerTool()
+ * para cada uma — nenhum outro lugar do código precisa saber quantas tools
+ * existem.
  *
  * As tools de escrita (criarAnuncioTool, editarAnuncioTool) exigem que o
  * seller tenha reautorizado com escopo "write" (ver auth/oauth.ts) — sellers
@@ -67,4 +73,7 @@ export const allTools: ToolDefinition<any>[] = [
   pesquisarMercadoTool,
   compararConcorrenciaTool,
   gerarRelatorioDesempenhoTool,
+  consultarProdutoBlingTool,
+  listarProdutosBlingTool,
+  editarProdutoBlingTool,
 ];
