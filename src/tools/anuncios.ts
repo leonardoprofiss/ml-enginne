@@ -62,14 +62,16 @@ export const consultarAnuncioTool: ToolDefinition<typeof itemSchema> = {
         getItem(seller, mlb),
         getItemDescription(seller, mlb).catch(() => ({ plain_text: "" })),
       ]);
+      const sellerSku = item.attributes?.find((a) => a.id === "SELLER_SKU")?.value_name ?? null;
       return ok(
         `${item.id} — ${item.title}\n` +
+          `SKU: ${sellerSku ?? "não cadastrado"}\n` +
           `Preço: R$ ${item.price} | Estoque: ${item.available_quantity} | Vendidos: ${item.sold_quantity}\n` +
           `Status: ${item.status} | Categoria: ${item.category_id} | Tipo de anúncio: ${item.listing_type_id}\n` +
           `Frete grátis: ${item.shipping?.free_shipping ? "sim" : "não"}\n` +
           `Link: ${item.permalink}\n` +
           `Descrição: ${description.plain_text.slice(0, 500)}${description.plain_text.length > 500 ? "..." : ""}`,
-        { item, description: description.plain_text }
+        { item, description: description.plain_text, sellerSku }
       );
     } catch (err) {
       return toErrorResult(err, "consultar_anuncio");
