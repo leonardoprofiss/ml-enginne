@@ -261,6 +261,23 @@ export const listPromotions = (sellerName: string, userId: string) =>
     query: { app_version: "v2" },
   });
 
+export interface MlPromotionItem {
+  id: string;
+  status: string;
+  price?: number;
+  original_price?: number;
+}
+
+export interface MlPromotionItemsResult {
+  results: MlPromotionItem[];
+  paging?: { total: number; offset: number; limit: number };
+}
+
+export const getPromotionItems = (sellerName: string, promotionId: string, promotionType: string) =>
+  mlGet<MlPromotionItemsResult>(sellerName, `/seller-promotions/promotions/${promotionId}/items`, {
+    query: { app_version: "v2", promotion_type: promotionType },
+  });
+
 // ---- Prices (histórico simplificado via item) ----
 export const getItemPrice = (sellerName: string, itemId: string) => getItem(sellerName, itemId);
 
