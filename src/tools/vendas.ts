@@ -72,7 +72,7 @@ export const consultarPedidosTool: ToolDefinition<typeof pedidosSchema> = {
       const lines = page.map(
         (o) =>
           `- #${o.id} | ${o.date_created} | status: ${o.status} | R$ ${o.total_amount} | itens: ${o.order_items
-            .map((oi) => `${oi.quantity}x ${oi.item.title}`)
+            .map((oi) => `${oi.quantity}x ${oi.item.title}${oi.item.seller_sku ? ` (SKU: ${oi.item.seller_sku})` : ""}`)
             .join(", ")}`
       );
       return ok(
