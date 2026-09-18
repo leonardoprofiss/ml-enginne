@@ -273,10 +273,17 @@ export interface MlPromotionItemsResult {
   paging?: { total: number; offset: number; limit: number };
 }
 
+/**
+ * GET /seller-promotions/promotions/{id}/items — itens participantes de uma
+ * campanha. Alguns tipos de campanha (ex.: UNHEALTHY_STOCK quando não há
+ * itens elegíveis) retornam `results: null` em vez de array vazio, então
+ * normalizamos aqui pra sempre devolver um array — evita `.map` quebrar em
+ * quem consome esta função.
+ */
 export const getPromotionItems = (sellerName: string, promotionId: string, promotionType: string) =>
   mlGet<MlPromotionItemsResult>(sellerName, `/seller-promotions/promotions/${promotionId}/items`, {
     query: { app_version: "v2", promotion_type: promotionType },
-  });
+  }).then((res) => ({ ...res, results: res.results ?? [] }));
 
 // ---- Prices (histórico simplificado via item) ----
 export const getItemPrice = (sellerName: string, itemId: string) => getItem(sellerName, itemId);
