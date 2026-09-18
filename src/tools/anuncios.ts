@@ -18,7 +18,7 @@ export const listarAnunciosTool: ToolDefinition<typeof limitSchema> = {
   name: "listar_anuncios",
   title: "Listar anúncios",
   description:
-    "Lista os anúncios (MLBs) de um seller, com título, preço, estoque disponível, vendas acumuladas e status. Suporta contas grandes via paginação por scroll — não traz tudo de uma vez se `limite` não for informado (default 100).",
+    "Lista os anúncios (MLBs) de um seller, com título, SKU, preço, estoque disponível, vendas acumuladas e status. Suporta contas grandes via paginação por scroll — não traz tudo de uma vez se `limite` não for informado (default 100).",
   inputSchema: limitSchema,
   handler: async ({ seller, status, limite }) => {
     try {
@@ -28,12 +28,10 @@ export const listarAnunciosTool: ToolDefinition<typeof limitSchema> = {
       const items = await getItemsMultiget(seller, allIds);
       const filtered = status && status !== "todos" ? items.filter((i) => i.status === status) : items;
 
-      const lines = filtered
-        .slice(0, max)
-        .map(
-          (i) =>
-            `- ${i.id} | ${i.title} | R$ ${i.price} | estoque: ${i.available_quantity} | vendidos: ${i.sold_quantity} | status: ${i.status}`
-        );
+      const lines = filtered.slice(0, max).map((i) => {
+        const sku = i.attributes?.find((a) => a.id === "SELLER_SKU")?.value_name;
+        return `- ${i.id} | ${i.title}${sku ? ` | SKU: ${sku}` : ""} | R$ ${i.price} | estoque: ${i.available_quantity} | vendidos: ${i.sold_quantity} | status: ${i.status}`;
+      });
 
       return ok(
         `${filtered.length} anúncio(s) encontrado(s) para ${seller}${status ? ` (status=${status})` : ""}:\n${lines.join("\n")}`,
@@ -53,7 +51,7 @@ const itemSchema = {
 export const consultarAnuncioTool: ToolDefinition<typeof itemSchema> = {
   name: "consultar_anuncio",
   title: "Consultar anúncio",
-  description: "Detalha um anúncio específico (título, preço, estoque, categoria, atributos, descrição e link).",
+  description: "Detalha um anúncio específico (título, SKU, preço, estoque, categoria, atributos, descrição e link).",
   inputSchema: itemSchema,
   handler: async ({ seller, mlb }) => {
     try {
