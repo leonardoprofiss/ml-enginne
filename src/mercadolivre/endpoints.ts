@@ -54,6 +54,9 @@ export interface MlItem {
   category_id: string;
   listing_type_id: string;
   health?: number;
+  sub_status?: string[];
+  warnings?: Array<{ code?: string; message?: string }>;
+  pictures?: Array<{ id: string; url?: string; secure_url?: string; size?: string; max_size?: string }>;
   last_updated: string;
   date_created: string;
   shipping?: { free_shipping: boolean; logistic_type?: string };

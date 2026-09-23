@@ -1,4 +1,7 @@
 import { mlGet } from "./client.js";
+import { env } from "../config/env.js";
+import { getValidAccessToken } from "../auth/tokenManager.js";
+import { MlApiError } from "./errors.js";
 
 /**
  * Endpoints adicionados para deixar o Enginne no mesmo nível do conector
@@ -100,3 +103,26 @@ export const getBillingSummary = (seller: string, periodKey: string, group: "ML"
   mlGet<any>(seller, `/billing/integration/periods/key/${periodKey}/summary/details`, {
     query: { group, document_type: "BILL" },
   });
+
+// ---- Imagens ----
+
+/**
+ * Sobe uma imagem (base64 ou data URL) para o repositório de fotos da ML e
+ * devolve o ID da foto, que depois é usado em PUT /items/{id} { pictures }.
+ */
+export async function uploadPicture(sellerName: string, base64OrDataUrl: string, fileName = "foto.jpg"): Promise<{ id: string; variations?: unknown[] }> {
+  const m = /^data:([^;]+);base64,(.*)$/s.exec(base64OrDataUrl);
+  const mime = m?.[1] ?? (fileName.endsWith(".png") ? "image/png" : "image/jpeg");
+  const bytes = Buffer.from(m?.[2] ?? base64OrDataUrl, "base64");
+  const token = await getValidAccessToken(sellerName);
+  const form = new FormData();
+  form.append("file", new Blob([bytes], { type: mime }), fileName);
+  const res = await fetch(`${env.ML_API_BASE_URL}/pictures/items/upload`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  const body: any = await res.json().catch(() => ({}));
+  if (!res.ok) throw new MlApiError(res.status, body?.error, body?.message ?? `Erro ${res.status} ao subir imagem`, "/pictures/items/upload");
+  return body;
+}
