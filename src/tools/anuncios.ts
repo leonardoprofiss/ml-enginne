@@ -81,13 +81,23 @@ export const consultarStatusAnuncioTool: ToolDefinition<typeof itemSchema> = {
   name: "consultar_status_anuncio",
   title: "Consultar status do anúncio",
   description:
-    "Retorna apenas o status atual de um anúncio (active, paused, closed, under_review) — mais leve que consultar_anuncio quando só o status importa.",
+    "Retorna o status atual de um anúncio (active, paused, closed, under_review) com o motivo (sub_status), tags de moderação e avisos do ML",
   inputSchema: itemSchema,
   handler: async ({ seller, mlb }) => {
     try {
       resolveSeller(seller);
       const item = await getItem(seller, mlb);
-      return ok(`${item.id} está com status: ${item.status}`, { id: item.id, status: item.status, health: item.health });
+      const sub = item.sub_status?.length ? ` | motivo/sub-status: ${item.sub_status.join(", ")}` : "";
+      const tags = (item.tags ?? []).filter((t) => /moderat|review|poor|incomplete|picture|forbidden|warning|block/i.test(t));
+      const warn = item.warnings?.length ? `\nAvisos do ML: ${item.warnings.map((w) => w.message ?? w.code).join("; ")}` : "";
+      return ok(`${item.id} está com status: ${item.status}${sub}${tags.length ? ` | tags: ${tags.join(", ")}` : ""}${warn}`, {
+        id: item.id,
+        status: item.status,
+        sub_status: item.sub_status,
+        tags: item.tags,
+        warnings: item.warnings,
+        health: item.health,
+      });
     } catch (err) {
       return toErrorResult(err, "consultar_status_anuncio");
     }
