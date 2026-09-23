@@ -71,7 +71,13 @@ export async function getValidAccessToken(sellerName: string): Promise<string> {
       return fresh.accessToken;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      markSellerError(sellerName, message);
+      const transient = (err as { transient?: boolean })?.transient === true;
+      if ((err as { code?: string })?.code === "invalid_grant") {
+        // refresh_token rejeitado de vez (revogado/expirado): precisa reautorizar.
+        markSellerError(sellerName, `Reautorização necessária: ${message}`);
+      } else if (!transient) {
+        markSellerError(sellerName, message);
+      }
       recordAudit(sellerName, "token_refresh_failed", message);
       log.error({ sellerName, err: message }, "falha ao renovar token");
       throw err;

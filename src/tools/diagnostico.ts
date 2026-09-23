@@ -4,6 +4,8 @@ import { getDb } from "../database/db.js";
 import { listSellers, getSellerByName, toPublic } from "../database/sellersRepo.js";
 import { getValidAccessToken } from "../auth/tokenManager.js";
 import { ok, type ToolDefinition } from "./types.js";
+import { mlGet } from "../mercadolivre/client.js";
+import { listAdvertisers } from "../mercadolivre/advertisingEndpoints.js";
 
 const diagSchema = {
   seller: z
@@ -19,9 +21,17 @@ interface CheckResult {
 }
 
 async function checkMlApi(): Promise<CheckResult> {
+  // Chamadas anônimas a partir de IPs de nuvem (Railway, Google Cloud) recebem
+  // 403 do Mercado Livre por política deles — isso NÃO indica problema na
+  // integração. Por isso o teste de verdade é o autenticado, em checkSeller.
   try {
     const res = await fetch(`${env.ML_API_BASE_URL}/sites/MLB`, { method: "GET" });
-    return { nome: "API Mercado Livre", ok: res.ok, detalhe: res.ok ? `HTTP ${res.status} (site MLB acessível)` : `HTTP ${res.status}` };
+    if (res.ok) return { nome: "API Mercado Livre (anônima)", ok: true, detalhe: `HTTP ${res.status}` };
+    return {
+      nome: "API Mercado Livre (anônima)",
+      ok: true,
+      detalhe: `HTTP ${res.status} — esperado para chamadas sem token a partir de servidores em nuvem; o teste que vale é o autenticado por seller`,
+    };
   } catch (err) {
     return { nome: "API Mercado Livre", ok: false, detalhe: `Falha de rede: ${String(err)}` };
   }
@@ -59,23 +69,46 @@ async function checkSeller(sellerName: string): Promise<CheckResult[]> {
   const results: CheckResult[] = [
     {
       nome: `Seller "${sellerName}"`,
-      ok: row.status === "active",
-      detalhe: `status=${row.status}${row.ml_nickname ? `, nickname=${row.ml_nickname}` : ""}`,
+      ok: row.status === "active" || row.status === "error",
+      detalhe: `status=${row.status}${row.ml_nickname ? `, nickname=${row.ml_nickname}` : ""}${row.last_error ? `, último erro: ${row.last_error}` : ""}`,
     },
   ];
-  if (row.status === "active") {
-    try {
-      await getValidAccessToken(sellerName);
-      results.push({
-        nome: `Token de "${sellerName}"`,
-        ok: true,
-        detalhe: `válido, expira em ${row.token_expires_at}, última renovação: ${row.last_refreshed_at ?? "n/d"}`,
-      });
-    } catch (err) {
-      results.push({ nome: `Token de "${sellerName}"`, ok: false, detalhe: String(err) });
-    }
-  } else if (row.last_error) {
-    results.push({ nome: `Último erro de "${sellerName}"`, ok: false, detalhe: row.last_error });
+  if (row.status === "revoked" || row.status === "pending") return results;
+
+  try {
+    await getValidAccessToken(sellerName);
+    const fresh = getSellerByName(sellerName)!;
+    results.push({
+      nome: `Token de "${sellerName}"`,
+      ok: true,
+      detalhe: `válido até ${fresh.token_expires_at}; última renovação ${fresh.last_refreshed_at ?? "n/d"}; escopos: ${fresh.scope ?? "n/d"}`,
+    });
+  } catch (err) {
+    results.push({ nome: `Token de "${sellerName}"`, ok: false, detalhe: String(err) });
+    return results;
+  }
+
+  try {
+    const me = await mlGet<{ id: number; nickname: string; seller_reputation?: { level_id?: string; power_seller_status?: string } }>(sellerName, "/users/me");
+    const rep = me.seller_reputation;
+    results.push({
+      nome: "Chamada autenticada (/users/me)",
+      ok: true,
+      detalhe: `${me.nickname} (id ${me.id})${rep ? `, reputação ${rep.level_id ?? "n/d"}${rep.power_seller_status ? `, MercadoLíder ${rep.power_seller_status}` : ""}` : ""}`,
+    });
+  } catch (err) {
+    results.push({ nome: "Chamada autenticada (/users/me)", ok: false, detalhe: String(err) });
+  }
+
+  try {
+    const adv = await listAdvertisers(sellerName, "PADS");
+    results.push({
+      nome: "Product Ads",
+      ok: true,
+      detalhe: adv.length ? adv.map((a) => `advertiser ${a.advertiser_id} (${a.site_id})`).join(", ") : "conta sem Product Ads habilitado",
+    });
+  } catch (err) {
+    results.push({ nome: "Product Ads", ok: false, detalhe: String(err) });
   }
   return results;
 }

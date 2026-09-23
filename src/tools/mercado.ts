@@ -2,6 +2,7 @@ import { z } from "zod";
 import { resolveSeller } from "./resolveSeller.js";
 import { ok, toErrorResult, type ToolDefinition } from "./types.js";
 import { searchMarketplace, getItem, type MlSearchResultItem } from "../mercadolivre/endpoints.js";
+import { getCatalogProductItems } from "../mercadolivre/extraEndpoints.js";
 
 /**
  * Pesquisa de mercado — usa a busca pública do Mercado Livre
@@ -107,8 +108,28 @@ export const compararConcorrenciaTool: ToolDefinition<typeof compararSchema> = {
       const termoBusca = termo ?? our.title;
       const siteId = mlb.match(/^[A-Z]{2,4}/)?.[0] ?? "MLB";
 
-      const res = await searchMarketplace(seller, siteId, { q: termoBusca, limit: limite ?? 20 });
-      const concorrentes = (res.results ?? []).filter((r) => r.id !== mlb);
+      // A busca pública (/sites/{site}/search) passou a responder "forbidden" para
+      // apps não certificados. Quando o anúncio é de catálogo, a concorrência
+      // direta está em /products/{catalog_product_id}/items (mesmo produto,
+      // outros vendedores) — é a mesma base que o ML usa na disputa.
+      let concorrentes: Array<Pick<MlSearchResultItem, "id" | "title" | "price"> & { seller: { id: number } }> = [];
+      let fonte = "busca";
+      try {
+        const res = await searchMarketplace(seller, siteId, { q: termoBusca, limit: limite ?? 20 });
+        concorrentes = (res.results ?? []).filter((r) => r.id !== mlb);
+      } catch (searchErr) {
+        if (!our.catalog_product_id) {
+          throw new Error(
+            `O Mercado Livre bloqueou a busca pública para esta integração (${searchErr instanceof Error ? searchErr.message : String(searchErr)}). ` +
+              `Para anúncios de catálogo, a comparação usa os outros vendedores do mesmo produto — este anúncio não é de catálogo. Alternativa: sugestao_preco.`
+          );
+        }
+        const prod = await getCatalogProductItems(seller, our.catalog_product_id);
+        fonte = `catálogo ${our.catalog_product_id}`;
+        concorrentes = (prod.results ?? [])
+          .filter((r: any) => r.item_id !== mlb)
+          .map((r: any) => ({ id: String(r.item_id), title: our.title, price: Number(r.price), seller: { id: Number(r.seller_id) } }));
+      }
 
       if (concorrentes.length === 0) {
         return ok(
@@ -132,10 +153,10 @@ export const compararConcorrenciaTool: ToolDefinition<typeof compararSchema> = {
 
       return ok(
         `Nosso anúncio: ${our.title} — R$ ${our.price.toFixed(2)} (${mlb})\n` +
-          `Concorrência para "${termoBusca}" (${concorrentes.length} resultado(s)): mínimo R$ ${min.toFixed(2)} | máximo R$ ${max.toFixed(2)} | médio R$ ${avg.toFixed(2)} | mediana R$ ${med.toFixed(2)}\n\n` +
+          `Concorrência (${fonte}) para "${termoBusca}" (${concorrentes.length} resultado(s)): mínimo R$ ${min.toFixed(2)} | máximo R$ ${max.toFixed(2)} | médio R$ ${avg.toFixed(2)} | mediana R$ ${med.toFixed(2)}\n\n` +
           `Estamos ${posicao} entre os concorrentes. ${diffMedia >= 0 ? "Acima" : "Abaixo"} da média em ${Math.abs(diffMedia).toFixed(1)}%, ` +
           `${diffMediana >= 0 ? "acima" : "abaixo"} da mediana em ${Math.abs(diffMediana).toFixed(1)}%.`,
-        { our, termoBusca, stats: { min, max, avg, median: med, maisBaratos, totalConcorrentes: concorrentes.length, diffMedia, diffMediana }, concorrentes }
+        { our, termoBusca, fonte, stats: { min, max, avg, median: med, maisBaratos, totalConcorrentes: concorrentes.length, diffMedia, diffMediana }, concorrentes }
       );
     } catch (err) {
       return toErrorResult(err, "comparar_concorrencia");

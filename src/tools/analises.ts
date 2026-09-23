@@ -53,8 +53,9 @@ export const buscarProdutosSemVendasTool: ToolDefinition<typeof semVendasSchema>
       const visits = await getItemsVisits(
         seller,
         limited.map((i) => i.id),
-        period.from,
-        period.to
+        // API de Visitas só aceita YYYY-MM-DD (ISO completo dá "unknown date format")
+        period.from.slice(0, 10),
+        period.to.slice(0, 10)
       );
 
       // Última venda: procura no histórico ampliado (até 180 dias) só para os candidatos, para não

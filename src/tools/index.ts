@@ -35,6 +35,7 @@ import {
   editarProdutoBlingTool,
   buscarProdutosSemNcmBlingTool,
 } from "./blingProdutos.js";
+import { paridadeTools } from "./paridade.js";
 
 export const allTools: ToolDefinition<any>[] = [
   listarContasTool,
@@ -73,4 +74,5 @@ export const allTools: ToolDefinition<any>[] = [
   listarProdutosBlingTool,
   editarProdutoBlingTool,
   buscarProdutosSemNcmBlingTool,
+  ...paridadeTools,
 ];

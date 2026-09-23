@@ -121,6 +121,10 @@ const editarAnuncioSchema = {
   estoque: z.number().int().nonnegative().optional().describe("Nova quantidade em estoque (opcional)"),
   status: z.enum(["ativo", "pausado"]).optional().describe("Novo status do anúncio (opcional) — ativo republica, pausado tira de circulação sem apagar."),
   descricao: z.string().optional().describe("Novo texto de descrição (opcional) — substitui a descrição atual inteira"),
+  atributos: z
+    .array(z.object({ id: z.string().describe("ID do atributo, ex.: BRAND, MODEL, GTIN"), valor: z.string().describe("Novo valor (value_name)") }))
+    .optional()
+    .describe("Atributos da ficha técnica a alterar (opcional). Só os informados mudam."),
   confirmar: z
     .boolean()
     .optional()
@@ -133,13 +137,13 @@ export const editarAnuncioTool: ToolDefinition<typeof editarAnuncioSchema> = {
   name: "editar_anuncio",
   title: "Editar anúncio",
   description:
-    "Edita título, preço, estoque, status (ativo/pausado) e/ou descrição de um anúncio existente. Só altera os campos informados — os demais ficam como estão. AÇÃO REAL sobre o anúncio: por padrão só mostra uma prévia (atual -> novo) — chame de novo com confirmar=true para aplicar.",
+    "Edita título, preço, estoque, status (ativo/pausado), descrição e/ou atributos da ficha técnica de um anúncio existente. No modelo User Products o título é alterado via family_name (só sem vendas). Só altera os campos informados — os demais ficam como estão. AÇÃO REAL sobre o anúncio: por padrão só mostra uma prévia (atual -> novo) — chame de novo com confirmar=true para aplicar.",
   inputSchema: editarAnuncioSchema,
-  handler: async ({ seller, mlb, titulo, preco, estoque, status, descricao, confirmar }) => {
+  handler: async ({ seller, mlb, titulo, preco, estoque, status, descricao, atributos, confirmar }) => {
     try {
       resolveSeller(seller);
 
-      const hasChange = [titulo, preco, estoque, status, descricao].some((v) => v !== undefined);
+      const hasChange = [titulo, preco, estoque, status, descricao, atributos].some((v) => v !== undefined);
       if (!hasChange) {
         return errorResult("Informe ao menos um campo para alterar (titulo, preco, estoque, status ou descricao).");
       }
@@ -154,6 +158,17 @@ export const editarAnuncioTool: ToolDefinition<typeof editarAnuncioSchema> = {
       const statusMl = status === "ativo" ? "active" : status === "pausado" ? "paused" : undefined;
       if (statusMl !== undefined && statusMl !== current.status) diffLines.push(`Status: ${current.status} -> ${statusMl}`);
       if (descricao !== undefined) diffLines.push(`Descrição: substituída (${descricao.length} caractere(s) novo(s))`);
+      for (const a of atributos ?? []) {
+        const atual = current.attributes?.find((x) => x.id === a.id)?.value_name ?? "(vazio)";
+        if (atual !== a.valor) diffLines.push(`Atributo ${a.id}: "${atual}" -> "${a.valor}"`);
+      }
+      if (titulo !== undefined && (current.family_name || current.user_product_id)) {
+        diffLines.push(
+          (current.sold_quantity ?? 0) > 0
+            ? `ATENÇÃO: anúncio no modelo User Products com vendas — o Mercado Livre NÃO permite trocar o título; a edição de título vai falhar.`
+            : `Obs.: anúncio no modelo User Products — o título será alterado via family_name e o ML pode ajustá-lo com base nos atributos.`
+        );
+      }
 
       if (diffLines.length === 0) {
         return ok(`Nenhuma mudança real: os valores informados já são iguais aos atuais de ${mlb}.`, { noop: true, current });
@@ -173,6 +188,7 @@ export const editarAnuncioTool: ToolDefinition<typeof editarAnuncioSchema> = {
         available_quantity: estoque,
         status: statusMl,
         description: descricao,
+        attributes: atributos?.map((a) => ({ id: a.id, value_name: a.valor })),
       });
 
       recordAudit(seller, "anuncio_editado", `${mlb}: ${diffLines.join(" | ")}`);

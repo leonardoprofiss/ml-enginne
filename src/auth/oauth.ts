@@ -70,35 +70,59 @@ interface MlTokenError {
 }
 
 async function postToken(body: Record<string, string>): Promise<TokenSet> {
-  const res = await fetch(`${env.ML_API_BASE_URL}/oauth/token`, {
-    method: "POST",
-    headers: {
-      accept: "application/json",
-      "content-type": "application/x-www-form-urlencoded",
-    },
-    body: new URLSearchParams(body).toString(),
-  });
+  // O endpoint /oauth/token também sofre rate limit (429) e instabilidade (5xx).
+  // Nesses casos o refresh_token NÃO é consumido pela ML, então é seguro tentar
+  // de novo com backoff. Sem isso, um único 429 derrubava a conta inteira
+  // (status "error" e todas as tools recusando o seller).
+  const MAX_TRIES = 5;
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
+    const res = await fetch(`${env.ML_API_BASE_URL}/oauth/token`, {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams(body).toString(),
+    });
+    lastStatus = res.status;
 
-  const json = (await res.json()) as MlTokenResponse | MlTokenError;
+    if (res.status === 429 || res.status >= 500) {
+      const retryAfter = Number(res.headers.get("retry-after"));
+      const waitMs = retryAfter > 0 ? retryAfter * 1000 : Math.min(1000 * 2 ** attempt + Math.random() * 300, 20_000);
+      log.warn({ status: res.status, attempt, waitMs }, "oauth/token temporariamente indisponível, tentando de novo");
+      await new Promise((r) => setTimeout(r, waitMs));
+      continue;
+    }
 
-  if (!res.ok || "error" in json) {
-    const err = json as MlTokenError;
-    log.error({ status: res.status, error: err.error, description: err.error_description }, "falha ao obter token");
-    throw new OAuthError(err.error ?? "unknown_error", err.error_description ?? `HTTP ${res.status}`);
+    let json: MlTokenResponse | MlTokenError;
+    try {
+      json = (await res.json()) as MlTokenResponse | MlTokenError;
+    } catch {
+      throw new OAuthError("invalid_response", `Resposta inválida do /oauth/token (HTTP ${res.status})`, true);
+    }
+
+    if (!res.ok || "error" in json) {
+      const err = json as MlTokenError;
+      log.error({ status: res.status, error: err.error, description: err.error_description }, "falha ao obter token");
+      throw new OAuthError(err.error ?? "unknown_error", err.error_description ?? `HTTP ${res.status}`);
+    }
+
+    const ok = json as MlTokenResponse;
+    return {
+      accessToken: ok.access_token,
+      refreshToken: ok.refresh_token,
+      scope: ok.scope,
+      expiresInSeconds: ok.expires_in,
+      mlUserId: String(ok.user_id),
+    };
   }
-
-  const ok = json as MlTokenResponse;
-  return {
-    accessToken: ok.access_token,
-    refreshToken: ok.refresh_token,
-    scope: ok.scope,
-    expiresInSeconds: ok.expires_in,
-    mlUserId: String(ok.user_id),
-  };
+  throw new OAuthError("rate_limited", `Mercado Livre limitou as chamadas ao /oauth/token (HTTP ${lastStatus}) — tente de novo em alguns minutos.`, true);
 }
 
 export class OAuthError extends Error {
-  constructor(public code: string, message: string) {
+  /** transient=true: falha temporária (429/5xx/rede) — o refresh_token continua válido. */
+  constructor(public code: string, message: string, public transient = false) {
     super(`[${code}] ${message}`);
     this.name = "OAuthError";
   }

@@ -58,6 +58,14 @@ export interface MlItem {
   date_created: string;
   shipping?: { free_shipping: boolean; logistic_type?: string };
   attributes?: Array<{ id: string; name: string; value_name: string | null }>;
+  /** Modelo "User Products": o título é derivado do family_name e não é editável via PUT title. */
+  family_name?: string | null;
+  user_product_id?: string | null;
+  catalog_product_id?: string | null;
+  catalog_listing?: boolean;
+  inventory_id?: string | null;
+  seller_custom_field?: string | null;
+  tags?: string[];
 }
 
 /** GET /items?ids=MLB1,MLB2,... (multiget, até 20 por chamada). */
@@ -103,7 +111,7 @@ export async function getItemsVisits(
 
   for (const chunk of chunks) {
     const res = await mlGet<Array<{ item_id: string; total_visits: number }>>(sellerName, "/items/visits", {
-      query: { ids: chunk.join(","), date_from: dateFrom, date_to: dateTo },
+      query: { ids: chunk.join(","), date_from: dateFrom.slice(0, 10), date_to: dateTo.slice(0, 10) }, // API só aceita YYYY-MM-DD
     });
     for (const entry of res) out[entry.item_id] = entry.total_visits;
   }
@@ -122,8 +130,14 @@ export interface MlOrder {
     item: { id: string; title: string; seller_sku?: string };
     quantity: number;
     unit_price: number;
+    /** Comissão do ML por unidade (tarifa de venda). */
+    sale_fee?: number;
+    listing_type_id?: string;
   }>;
   buyer?: { id: number; nickname: string };
+  paid_amount?: number;
+  tags?: string[];
+  cancel_detail?: { requested_by?: string; description?: string } | null;
   shipping?: { id: number };
 }
 

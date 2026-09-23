@@ -79,6 +79,8 @@ export async function setItemDescription(sellerName: string, itemId: string, pla
 
 export interface UpdateItemInput {
   title?: string;
+  /** Atributos da ficha técnica: [{ id: "BRAND", value_name: "Oficinal" }, ...] */
+  attributes?: Array<{ id: string; value_name?: string | null; value_id?: string | null }>;
   price?: number;
   available_quantity?: number;
   status?: "active" | "paused";
@@ -94,10 +96,30 @@ export interface UpdateItemInput {
  */
 export async function updateItem(sellerName: string, itemId: string, input: UpdateItemInput): Promise<MlItem> {
   const body: Record<string, unknown> = {};
-  if (input.title !== undefined) body.title = input.title;
+  let titleViaFamily = false;
+
+  if (input.title !== undefined) {
+    // Modelo "User Products / Preço por variação": o ML calcula o título a partir
+    // do family_name. Enviar `title` no PUT /items dá BODY_INVALID_FIELDS; o
+    // caminho certo é PUT /items/{id}/family_name (só permitido sem vendas).
+    const current = await getItem(sellerName, itemId);
+    if (current.family_name || current.user_product_id) {
+      if ((current.sold_quantity ?? 0) > 0) {
+        throw new Error(
+          `O anúncio ${itemId} está no modelo User Products e já tem ${current.sold_quantity} venda(s): nesse modelo o Mercado Livre não permite mudar o título (family_name) depois da primeira venda. ` +
+            `Alternativas: ajustar atributos da ficha técnica (que compõem o título) ou criar um anúncio novo.`
+        );
+      }
+      await mlPut(sellerName, `/items/${itemId}/family_name`, { family_name: input.title });
+      titleViaFamily = true;
+    } else {
+      body.title = input.title;
+    }
+  }
   if (input.price !== undefined) body.price = input.price;
   if (input.available_quantity !== undefined) body.available_quantity = input.available_quantity;
   if (input.status !== undefined) body.status = input.status;
+  if (input.attributes !== undefined && input.attributes.length > 0) body.attributes = input.attributes;
 
   let item: MlItem | undefined;
   if (Object.keys(body).length > 0) {
@@ -108,5 +130,6 @@ export async function updateItem(sellerName: string, itemId: string, input: Upda
     await setItemDescription(sellerName, itemId, input.description);
   }
 
-  return item ?? (await getItem(sellerName, itemId));
+  if (titleViaFamily || !item) return await getItem(sellerName, itemId);
+  return item;
 }
