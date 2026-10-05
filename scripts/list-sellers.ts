@@ -1,6 +1,6 @@
 import { listSellers, toPublic } from "../src/database/sellersRepo.js";
 
-const sellers = listSellers().map(toPublic);
+const sellers = (await listSellers()).map(toPublic);
 
 if (sellers.length === 0) {
   console.log("Nenhum seller configurado. Use: npm run oauth:add-seller -- nome_do_cliente");

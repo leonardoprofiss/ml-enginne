@@ -3,8 +3,8 @@ import { getSellerByName, type SellerRow } from "../database/sellersRepo.js";
 export class ToolInputError extends Error {}
 
 /** Resolve um nome de seller para o registro no banco, validando que já foi autorizado. */
-export function resolveSeller(sellerName: string): SellerRow {
-  const row = getSellerByName(sellerName);
+export async function resolveSeller(sellerName: string): Promise<SellerRow> {
+  const row = await getSellerByName(sellerName);
   if (!row) {
     throw new ToolInputError(
       `Seller "${sellerName}" não encontrado. Use a tool listar_contas() para ver os nomes disponíveis.`

@@ -46,8 +46,14 @@ const envSchema = z.object({
   // Sem isso, qualquer pessoa que descubra a URL pública leria dados de todos os sellers.
   MCP_API_KEY: z.string().min(16, "MCP_API_KEY deve ter pelo menos 16 caracteres"),
 
-  // Caminho do arquivo SQLite (trocar por Postgres em produção multi-instância — ver README).
-  DATABASE_PATH: z.string().default("./data/enginne.sqlite"),
+  // Onde os dados (contas conectadas e tokens cifrados) ficam guardados.
+  // "firestore": banco do Google Cloud (produção no Cloud Run).
+  // "memory": só na memória do processo — apenas para desenvolvimento/testes.
+  DATA_STORE: z.enum(["firestore", "memory"]).default("firestore"),
+  // Banco do Firestore a usar. Vazio = banco padrão "(default)" do projeto.
+  FIRESTORE_DATABASE_ID: z.string().optional(),
+  // Prefixo das coleções, para não misturar com outros dados do projeto.
+  FIRESTORE_COLLECTION_PREFIX: z.string().default("enginne_"),
 
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace"]).default("info"),
 });

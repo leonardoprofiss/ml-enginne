@@ -34,12 +34,12 @@ export function getRedirectUri(): string {
  * Inicia o fluxo para um seller: gera state + PKCE, persiste como "pending"
  * e retorna a URL de autorização para a qual o navegador do cliente deve ir.
  */
-export function startAuthorization(sellerName: string): string {
+export async function startAuthorization(sellerName: string): Promise<string> {
   const state = generateState();
   const { codeVerifier, codeChallenge } = generatePkcePair();
   const redirectUri = getRedirectUri();
 
-  savePendingAuthorization({ state, sellerName, codeVerifier, redirectUri });
+  await savePendingAuthorization({ state, sellerName, codeVerifier, redirectUri });
 
   const url = new URL(`https://${env.ML_AUTH_DOMAIN}/authorization`);
   url.searchParams.set("response_type", "code");

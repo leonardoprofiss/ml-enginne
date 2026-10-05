@@ -10,7 +10,7 @@ export const listarContasTool: ToolDefinition<{}> = {
     "Lista todos os sellers (contas do Mercado Livre) atualmente configurados no Enginne, com status da autorização OAuth de cada um (pending, active, expired, revoked, error). Use antes de qualquer outra análise para saber quais nomes de seller estão disponíveis.",
   inputSchema: {},
   handler: async () => {
-    const sellers = listSellers().map(toPublic);
+    const sellers = (await listSellers()).map(toPublic);
     if (sellers.length === 0) {
       return ok(
         "Nenhum seller configurado ainda. Peça ao administrador para rodar `npm run oauth:add-seller -- <nome>` para conectar a primeira conta."
@@ -41,7 +41,7 @@ export const consultarSellerTool: ToolDefinition<typeof consultarSellerSchema> =
     "Retorna dados detalhados de uma conta do Mercado Livre: nickname, data de registro, país, reputação resumida e status do site. Faz uma chamada em tempo real à API (GET /users/{id}).",
   inputSchema: consultarSellerSchema,
   handler: async ({ seller }) => {
-    const row = getSellerByName(seller);
+    const row = await getSellerByName(seller);
     if (!row) return toErrorResult(new Error(`Seller "${seller}" não encontrado`), "consultar_seller");
     try {
       const me = await getMe(seller);

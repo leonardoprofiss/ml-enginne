@@ -64,7 +64,7 @@ export const criarAnuncioTool: ToolDefinition<typeof criarAnuncioSchema> = {
   inputSchema: criarAnuncioSchema,
   handler: async ({ seller, titulo, categoriaId, preco, quantidade, tipoAnuncio, condicao, descricao, fotos, atributos, confirmar }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
 
       const previewLines = [
         `Título: ${titulo}`,
@@ -141,7 +141,7 @@ export const editarAnuncioTool: ToolDefinition<typeof editarAnuncioSchema> = {
   inputSchema: editarAnuncioSchema,
   handler: async ({ seller, mlb, titulo, preco, estoque, status, descricao, atributos, confirmar }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
 
       const hasChange = [titulo, preco, estoque, status, descricao, atributos].some((v) => v !== undefined);
       if (!hasChange) {

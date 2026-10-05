@@ -22,7 +22,7 @@ export const listarAnunciosTool: ToolDefinition<typeof limitSchema> = {
   inputSchema: limitSchema,
   handler: async ({ seller, status, limite }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const max = limite ?? 100;
       const allIds = await searchAllItemIds(seller, row.ml_user_id!, max);
       const items = await getItemsMultiget(seller, allIds);
@@ -55,7 +55,7 @@ export const consultarAnuncioTool: ToolDefinition<typeof itemSchema> = {
   inputSchema: itemSchema,
   handler: async ({ seller, mlb }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const [item, description] = await Promise.all([
         getItem(seller, mlb),
         getItemDescription(seller, mlb).catch(() => ({ plain_text: "" })),
@@ -85,7 +85,7 @@ export const consultarStatusAnuncioTool: ToolDefinition<typeof itemSchema> = {
   inputSchema: itemSchema,
   handler: async ({ seller, mlb }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const item = await getItem(seller, mlb);
       const sub = item.sub_status?.length ? ` | motivo/sub-status: ${item.sub_status.join(", ")}` : "";
       const tags = (item.tags ?? []).filter((t) => /moderat|review|poor|incomplete|picture|forbidden|warning|block/i.test(t));
@@ -111,7 +111,7 @@ export const consultarEstoqueTool: ToolDefinition<typeof itemSchema> = {
   inputSchema: itemSchema,
   handler: async ({ seller, mlb }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const item = await getItem(seller, mlb);
       return ok(`${item.id} (${item.title}): ${item.available_quantity} unidades em estoque.`, {
         id: item.id,
@@ -130,7 +130,7 @@ export const consultarPrecoTool: ToolDefinition<typeof itemSchema> = {
   inputSchema: itemSchema,
   handler: async ({ seller, mlb }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const item = await getItem(seller, mlb);
       return ok(`${item.id} (${item.title}): R$ ${item.price} ${item.currency_id}`, {
         id: item.id,

@@ -36,7 +36,7 @@ export const gerarRelatorioDesempenhoTool: ToolDefinition<typeof relatorioSchema
   inputSchema: relatorioSchema,
   handler: async ({ seller, dias }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const janela = dias ?? 30;
       const period = lastNDays(janela);
       const periodYmd = lastNDaysYmd(janela);

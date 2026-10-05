@@ -35,7 +35,7 @@ function isExpiringSoon(row: BlingSellerRow): boolean {
 }
 
 export async function getValidBlingAccessToken(sellerName: string): Promise<string> {
-  const row = getBlingSellerByName(sellerName);
+  const row = await getBlingSellerByName(sellerName);
   if (!row) throw new BlingSellerNotFoundError(sellerName);
   if (row.status === "revoked" || row.status === "pending") {
     throw new BlingSellerNotAuthorizedError(sellerName, row.status);
@@ -53,11 +53,11 @@ export async function getValidBlingAccessToken(sellerName: string): Promise<stri
     try {
       log.info({ sellerName }, "renovando access_token bling");
       const fresh = await refreshBlingTokens(tokens.refreshToken);
-      saveBlingTokens(sellerName, fresh);
+      await saveBlingTokens(sellerName, fresh);
       return fresh.accessToken;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      markBlingSellerError(sellerName, message);
+      await markBlingSellerError(sellerName, message);
       throw err;
     } finally {
       refreshLocks.delete(sellerName);

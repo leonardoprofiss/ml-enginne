@@ -29,7 +29,7 @@ export const buscarProdutosSemVendasTool: ToolDefinition<typeof semVendasSchema>
   inputSchema: semVendasSchema,
   handler: async ({ seller, dias, estoqueMinimo, limite }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const period = lastNDays(dias ?? 30);
       const minStock = estoqueMinimo ?? 1;
       const max = limite ?? 100;
@@ -109,7 +109,7 @@ export const compararPeriodosTool: ToolDefinition<typeof compararSchema> = {
   inputSchema: compararSchema,
   handler: async ({ seller, dias }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const current = lastNDays(dias ?? 30);
       const previous = precedingNDays(dias ?? 30);
 
@@ -200,7 +200,7 @@ export const analisarQuedaVendasTool: ToolDefinition<typeof quedaSchema> = {
   inputSchema: quedaSchema,
   handler: async ({ seller, dias, quedaMinimaPct, limite }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const current = lastNDays(dias ?? 30);
       const previous = precedingNDays(dias ?? 30);
       const minDropPct = quedaMinimaPct ?? 20;

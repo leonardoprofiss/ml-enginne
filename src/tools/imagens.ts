@@ -48,7 +48,7 @@ export const atualizarImagensAnuncioTool: ToolDefinition<typeof schema> = {
   inputSchema: schema,
   handler: async ({ seller, mlb, acao, imagens, posicao, remover_ids, ordem_ids, confirmar }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const item = await getItem(seller, mlb);
       const atuais = item.pictures ?? [];
       const atuaisIds = atuais.map((p) => p.id);

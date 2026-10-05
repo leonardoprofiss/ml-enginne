@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { env } from "../config/env.js";
-import { getDb } from "../database/db.js";
+import { getStore } from "../database/db.js";
 import { listSellers, getSellerByName, toPublic } from "../database/sellersRepo.js";
 import { getValidAccessToken } from "../auth/tokenManager.js";
 import { ok, type ToolDefinition } from "./types.js";
@@ -47,10 +47,15 @@ function checkOAuthConfig(): CheckResult {
   };
 }
 
-function checkDb(): CheckResult {
+async function checkDb(): Promise<CheckResult> {
   try {
-    getDb().prepare("SELECT 1").get();
-    return { nome: "Banco de dados", ok: true, detalhe: `SQLite OK (${env.DATABASE_PATH})` };
+    const store = getStore();
+    await store.ping();
+    return {
+      nome: "Banco de dados",
+      ok: true,
+      detalhe: store.kind === "firestore" ? "Firestore OK" : "memória do processo (os dados somem ao reiniciar)",
+    };
   } catch (err) {
     return { nome: "Banco de dados", ok: false, detalhe: String(err) };
   }
@@ -62,7 +67,7 @@ function checkMcp(): CheckResult {
 }
 
 async function checkSeller(sellerName: string): Promise<CheckResult[]> {
-  const row = getSellerByName(sellerName);
+  const row = await getSellerByName(sellerName);
   if (!row) {
     return [{ nome: `Seller "${sellerName}"`, ok: false, detalhe: "não encontrado no banco" }];
   }
@@ -77,7 +82,7 @@ async function checkSeller(sellerName: string): Promise<CheckResult[]> {
 
   try {
     await getValidAccessToken(sellerName);
-    const fresh = getSellerByName(sellerName)!;
+    const fresh = (await getSellerByName(sellerName))!;
     results.push({
       nome: `Token de "${sellerName}"`,
       ok: true,
@@ -120,12 +125,12 @@ export const diagnosticarIntegracaoTool: ToolDefinition<typeof diagSchema> = {
     "Roda uma checagem de saúde completa do Enginne: conectividade com a API do Mercado Livre, configuração OAuth, banco de dados, servidor MCP e (se um seller for informado) validade do token daquele seller. Use para investigar problemas antes de reportar um bug.",
   inputSchema: diagSchema,
   handler: async ({ seller }) => {
-    const checks: CheckResult[] = [checkMcp(), checkOAuthConfig(), checkDb(), await checkMlApi()];
+    const checks: CheckResult[] = [checkMcp(), checkOAuthConfig(), await checkDb(), await checkMlApi()];
 
     if (seller) {
       checks.push(...(await checkSeller(seller)));
     } else {
-      const sellers = listSellers();
+      const sellers = await listSellers();
       const active = sellers.filter((s) => s.status === "active").length;
       checks.push({
         nome: "Sellers configurados",
@@ -140,7 +145,7 @@ export const diagnosticarIntegracaoTool: ToolDefinition<typeof diagSchema> = {
     return ok(`Diagnóstico do Enginne (${allOk ? "tudo OK" : "há problemas"}):\n${lines.join("\n")}`, {
       allOk,
       checks,
-      sellers: seller ? undefined : listSellers().map(toPublic),
+      sellers: seller ? undefined : (await listSellers()).map(toPublic),
     });
   },
 };

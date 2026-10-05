@@ -22,7 +22,7 @@ export const consultarEnviosTool: ToolDefinition<typeof envioSchema> = {
   inputSchema: envioSchema,
   handler: async ({ seller, shipmentId }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const shipment = await getShipment(seller, shipmentId);
       return ok(
         `Envio ${shipment.id}: status ${shipment.status}${shipment.substatus ? ` (${shipment.substatus})` : ""}\n` +
@@ -44,7 +44,7 @@ export const consultarReputacaoTool: ToolDefinition<typeof reputacaoSchema> = {
   inputSchema: reputacaoSchema,
   handler: async ({ seller }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const res = await getUserReputation(seller, row.ml_user_id!);
       const rep = res.seller_reputation;
       return ok(
@@ -73,7 +73,7 @@ export const consultarPromocoesTool: ToolDefinition<typeof promoSchema> = {
   inputSchema: promoSchema,
   handler: async ({ seller }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const res = await listPromotions(seller, row.ml_user_id!);
       const lines = res.results.map((p) => `- ${p.id} | tipo: ${p.type} | status: ${p.status}`);
       return ok(`${res.results.length} promoção(ões) encontrada(s):\n${lines.join("\n")}`, { promotions: res.results });
@@ -98,7 +98,7 @@ export const consultarItensPromocaoTool: ToolDefinition<typeof itensPromoSchema>
   inputSchema: itensPromoSchema,
   handler: async ({ seller, promotionId, promotionType }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const res = await getPromotionItems(seller, promotionId, promotionType);
       const lines = res.results.map(
         (i) => `- ${i.id} | status: ${i.status}${i.price ? ` | R$ ${i.price} (de R$ ${i.original_price})` : ""}`
@@ -122,7 +122,7 @@ export const buscarAnunciosForaPromocaoTool: ToolDefinition<typeof foraPromocaoS
   inputSchema: foraPromocaoSchema,
   handler: async ({ seller }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const promos = await listPromotions(seller, row.ml_user_id!);
 
       const idsEmPromocao = new Set<string>();

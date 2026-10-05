@@ -7,14 +7,15 @@ const log = childLogger("mcp-server");
 
 /**
  * Cria uma instância do McpServer com todas as tools do Enginne registradas.
- * Uma instância NOVA é criada por sessão HTTP (ver server/index.ts) — é o
- * padrão recomendado pelo SDK para não vazar estado entre clientes/sessões.
+ * Uma instância NOVA é criada a cada requisição HTTP (ver server/index.ts):
+ * o servidor não guarda sessão em memória, então funciona no Cloud Run mesmo
+ * quando a instância é desligada por inatividade ou há mais de uma no ar.
  */
 export function createEnginneServer(): McpServer {
   const server = new McpServer(
     {
       name: "mercado-livre-enginne",
-      version: "0.1.0",
+      version: "0.2.0",
     },
     {
       capabilities: { tools: {} },
@@ -55,6 +56,6 @@ export function createEnginneServer(): McpServer {
     );
   }
 
-  log.info({ toolCount: allTools.length }, "servidor MCP configurado");
+  log.debug({ toolCount: allTools.length }, "servidor MCP configurado");
   return server;
 }

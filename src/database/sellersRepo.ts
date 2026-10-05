@@ -1,10 +1,15 @@
-import { getDb } from "./db.js";
+import { getStore } from "./db.js";
 import { decryptSecret, encryptSecret } from "../utils/crypto.js";
+import { childLogger } from "../utils/logger.js";
+
+const auditLog = childLogger("audit");
+
+const SELLERS = "sellers";
+const OAUTH_PENDING = "oauth_pending";
 
 export type SellerStatus = "pending" | "active" | "expired" | "revoked" | "error";
 
 export interface SellerRow {
-  id: number;
   seller_name: string;
   ml_user_id: string | null;
   ml_nickname: string | null;
@@ -47,31 +52,45 @@ export function toPublic(row: SellerRow): SellerPublic {
   };
 }
 
-export function listSellers(): SellerRow[] {
-  return getDb().prepare("SELECT * FROM sellers ORDER BY seller_name ASC").all() as SellerRow[];
+function novoSeller(sellerName: string): SellerRow {
+  const now = new Date().toISOString();
+  return {
+    seller_name: sellerName,
+    ml_user_id: null,
+    ml_nickname: null,
+    access_token_enc: null,
+    refresh_token_enc: null,
+    scope: null,
+    token_expires_at: null,
+    authorized_at: null,
+    status: "pending",
+    last_refreshed_at: null,
+    last_error: null,
+    created_at: now,
+    updated_at: now,
+  };
 }
 
-export function getSellerByName(sellerName: string): SellerRow | undefined {
-  return getDb()
-    .prepare("SELECT * FROM sellers WHERE seller_name = ?")
-    .get(sellerName) as SellerRow | undefined;
+export async function listSellers(): Promise<SellerRow[]> {
+  const rows = (await getStore().list(SELLERS)) as unknown as SellerRow[];
+  return rows.sort((a, b) => a.seller_name.localeCompare(b.seller_name));
 }
 
-export function getSellerByMlUserId(mlUserId: string): SellerRow | undefined {
-  return getDb()
-    .prepare("SELECT * FROM sellers WHERE ml_user_id = ?")
-    .get(mlUserId) as SellerRow | undefined;
+export async function getSellerByName(sellerName: string): Promise<SellerRow | undefined> {
+  return (await getStore().get(SELLERS, sellerName)) as SellerRow | undefined;
+}
+
+export async function getSellerByMlUserId(mlUserId: string): Promise<SellerRow | undefined> {
+  return (await listSellers()).find((s) => s.ml_user_id === mlUserId);
 }
 
 /** Cria (ou retorna) o registro "pending" que antecede a autorização OAuth. */
-export function ensureSellerPlaceholder(sellerName: string): SellerRow {
-  const existing = getSellerByName(sellerName);
+export async function ensureSellerPlaceholder(sellerName: string): Promise<SellerRow> {
+  const existing = await getSellerByName(sellerName);
   if (existing) return existing;
-  const db = getDb();
-  db.prepare(
-    `INSERT INTO sellers (seller_name, status) VALUES (?, 'pending')`
-  ).run(sellerName);
-  return getSellerByName(sellerName)!;
+  const row = novoSeller(sellerName);
+  await getStore().set(SELLERS, sellerName, { ...row });
+  return row;
 }
 
 export interface TokenSet {
@@ -83,56 +102,48 @@ export interface TokenSet {
 }
 
 /** Persiste tokens novos (autorização inicial ou refresh), sempre cifrados. */
-export function saveTokens(sellerName: string, tokens: TokenSet): void {
-  const db = getDb();
+export async function saveTokens(sellerName: string, tokens: TokenSet): Promise<void> {
   const expiresAt = new Date(Date.now() + tokens.expiresInSeconds * 1000).toISOString();
   const now = new Date().toISOString();
-  const existing = getSellerByName(sellerName);
+  const existing = (await getSellerByName(sellerName)) ?? novoSeller(sellerName);
 
-  db.prepare(
-    `UPDATE sellers SET
-       ml_user_id = ?,
-       access_token_enc = ?,
-       refresh_token_enc = ?,
-       scope = ?,
-       token_expires_at = ?,
-       authorized_at = COALESCE(authorized_at, ?),
-       status = 'active',
-       last_refreshed_at = ?,
-       last_error = NULL,
-       updated_at = ?
-     WHERE seller_name = ?`
-  ).run(
-    tokens.mlUserId,
-    encryptSecret(tokens.accessToken),
-    encryptSecret(tokens.refreshToken),
-    tokens.scope,
-    expiresAt,
-    existing?.authorized_at ?? now,
-    now,
-    now,
-    sellerName
-  );
+  const row: SellerRow = {
+    ...existing,
+    ml_user_id: tokens.mlUserId,
+    access_token_enc: encryptSecret(tokens.accessToken),
+    refresh_token_enc: encryptSecret(tokens.refreshToken),
+    scope: tokens.scope,
+    token_expires_at: expiresAt,
+    authorized_at: existing.authorized_at ?? now,
+    status: "active",
+    last_refreshed_at: now,
+    last_error: null,
+    updated_at: now,
+  };
+  await getStore().set(SELLERS, sellerName, { ...row });
 }
 
-export function markSellerError(sellerName: string, message: string): void {
-  getDb()
-    .prepare(
-      `UPDATE sellers SET status = 'error', last_error = ?, updated_at = ? WHERE seller_name = ?`
-    )
-    .run(message, new Date().toISOString(), sellerName);
+export async function markSellerError(sellerName: string, message: string): Promise<void> {
+  if (!(await getSellerByName(sellerName))) return;
+  await getStore().merge(SELLERS, sellerName, {
+    status: "error",
+    last_error: message,
+    updated_at: new Date().toISOString(),
+  });
 }
 
-export function markSellerRevoked(sellerName: string): void {
-  getDb()
-    .prepare(
-      `UPDATE sellers SET status = 'revoked', access_token_enc = NULL, refresh_token_enc = NULL, updated_at = ? WHERE seller_name = ?`
-    )
-    .run(new Date().toISOString(), sellerName);
+export async function markSellerRevoked(sellerName: string): Promise<void> {
+  if (!(await getSellerByName(sellerName))) return;
+  await getStore().merge(SELLERS, sellerName, {
+    status: "revoked",
+    access_token_enc: null,
+    refresh_token_enc: null,
+    updated_at: new Date().toISOString(),
+  });
 }
 
-export function deleteSeller(sellerName: string): void {
-  getDb().prepare("DELETE FROM sellers WHERE seller_name = ?").run(sellerName);
+export async function deleteSeller(sellerName: string): Promise<void> {
+  await getStore().delete(SELLERS, sellerName);
 }
 
 /** Descriptografa os tokens de um seller. Uso restrito ao TokenManager. */
@@ -155,36 +166,37 @@ export interface OAuthPendingRow {
   expires_at: string;
 }
 
-export function savePendingAuthorization(params: {
+export async function savePendingAuthorization(params: {
   state: string;
   sellerName: string;
   codeVerifier: string;
   redirectUri: string;
   ttlMinutes?: number;
-}): void {
-  const expiresAt = new Date(Date.now() + (params.ttlMinutes ?? 15) * 60_000).toISOString();
-  getDb()
-    .prepare(
-      `INSERT INTO oauth_pending (state, seller_name, code_verifier, redirect_uri, expires_at) VALUES (?, ?, ?, ?, ?)`
-    )
-    .run(params.state, params.sellerName, params.codeVerifier, params.redirectUri, expiresAt);
+}): Promise<void> {
+  const row: OAuthPendingRow = {
+    state: params.state,
+    seller_name: params.sellerName,
+    code_verifier: params.codeVerifier,
+    redirect_uri: params.redirectUri,
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + (params.ttlMinutes ?? 15) * 60_000).toISOString(),
+  };
+  await getStore().set(OAUTH_PENDING, params.state, { ...row });
 }
 
-export function consumePendingAuthorization(state: string): OAuthPendingRow | undefined {
-  const db = getDb();
-  const row = db.prepare("SELECT * FROM oauth_pending WHERE state = ?").get(state) as
-    | OAuthPendingRow
-    | undefined;
+export async function consumePendingAuthorization(state: string): Promise<OAuthPendingRow | undefined> {
+  const row = (await getStore().take(OAUTH_PENDING, state)) as OAuthPendingRow | undefined;
   if (!row) return undefined;
-  db.prepare("DELETE FROM oauth_pending WHERE state = ?").run(state);
   if (new Date(row.expires_at).getTime() < Date.now()) {
     return undefined; // expirado
   }
   return row;
 }
 
+/**
+ * Auditoria leve (sem payloads sensíveis). Vai para o log do processo, que no
+ * Cloud Run fica guardado e pesquisável no Cloud Logging — não ocupa o banco.
+ */
 export function recordAudit(sellerName: string | null, event: string, detail?: string): void {
-  getDb()
-    .prepare("INSERT INTO audit_log (seller_name, event, detail) VALUES (?, ?, ?)")
-    .run(sellerName, event, detail ?? null);
+  auditLog.info({ audit: true, seller: sellerName, event, detail: detail ?? null }, "audit");
 }

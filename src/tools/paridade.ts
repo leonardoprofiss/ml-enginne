@@ -57,7 +57,7 @@ export const consultarPedidoTool: ToolDefinition<typeof pedidoSchema> = {
   inputSchema: pedidoSchema,
   handler: async ({ seller, pedidoId }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const order = await ex.getOrder(seller, pedidoId);
       const shipId = order.shipping?.id;
       const [ship, costs] = shipId ? await Promise.all([safe(ex.getShipment(seller, shipId)), safe(ex.getShipmentCosts(seller, shipId))]) : [null, null];
@@ -91,7 +91,7 @@ export const custosPedidosTool: ToolDefinition<typeof custosSchema> = {
   inputSchema: custosSchema,
   handler: async ({ seller, dias, incluirFrete }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const period = lastNDays(dias ?? 30);
       const orders = (await searchAllOrders(seller, row.ml_user_id!, { dateFrom: period.from, dateTo: period.to, maxOrders: 1000 })).filter((o) =>
         PAGOS.has(o.status)
@@ -129,7 +129,7 @@ export const vendasDiariasTool: ToolDefinition<typeof vendasDiariasSchema> = {
   inputSchema: vendasDiariasSchema,
   handler: async ({ seller, dias }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const period = lastNDays(dias ?? 30);
       const orders = await searchAllOrders(seller, row.ml_user_id!, { dateFrom: period.from, dateTo: period.to, maxOrders: 1000 });
       const byDay = new Map<string, { pedidos: number; unidades: number; receita: number; comissao: number; cancelados: number }>();
@@ -164,7 +164,7 @@ export const vendasPorAnuncioTool: ToolDefinition<typeof vendasItemSchema> = {
   inputSchema: vendasItemSchema,
   handler: async ({ seller, dias, limite }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const period = lastNDays(dias ?? 30);
       const orders = (await searchAllOrders(seller, row.ml_user_id!, { dateFrom: period.from, dateTo: period.to, maxOrders: 1000 })).filter((o) =>
         PAGOS.has(o.status)
@@ -195,7 +195,7 @@ export const cancelamentosTool: ToolDefinition<typeof vendasDiariasSchema> = {
   inputSchema: vendasDiariasSchema,
   handler: async ({ seller, dias }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const period = lastNDays(dias ?? 30);
       const orders = (await searchAllOrders(seller, row.ml_user_id!, { dateFrom: period.from, dateTo: period.to, maxOrders: 1000 })).filter(
         (o) => o.status === "cancelled"
@@ -231,7 +231,7 @@ export const buscarReclamacoesTool: ToolDefinition<typeof claimsSchema> = {
   inputSchema: claimsSchema,
   handler: async ({ seller, status, tipo, limite }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const res = await ex.searchClaims(seller, { status: status ?? "opened", type: tipo, limit: limite ?? 30 });
       const data: any[] = res.data ?? res.results ?? [];
       const lines = data.map(
@@ -253,7 +253,7 @@ export const consultarReclamacaoTool: ToolDefinition<typeof claimSchema> = {
   inputSchema: claimSchema,
   handler: async ({ seller, reclamacaoId }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const claim = await ex.getClaim(seller, reclamacaoId);
       const [reason, returns] = await Promise.all([
         claim.reason_id ? safe(ex.getClaimReason(seller, claim.reason_id)) : Promise.resolve(null),
@@ -286,7 +286,7 @@ export const resumoAvaliacoesTool: ToolDefinition<typeof reviewsResumoSchema> = 
   inputSchema: reviewsResumoSchema,
   handler: async ({ seller, mlbs }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       let ids = mlbs;
       if (!ids?.length) {
         const all = await searchAllItemIds(seller, row.ml_user_id!, 1000);
@@ -322,7 +322,7 @@ export const buscarAvaliacoesTool: ToolDefinition<typeof reviewsSchema> = {
   inputSchema: reviewsSchema,
   handler: async ({ seller, mlb, estrelasMax, limite }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const r = await ex.getItemReviews(seller, mlb, 0, 100);
       const reviews: any[] = (r.reviews ?? []).filter((x: any) => !estrelasMax || x.rate <= estrelasMax).slice(0, limite ?? 30);
       const lines = reviews.map((x) => `- ${x.rate}★ ${ymdBr(x.date_created ?? "")} ${x.title ? `"${x.title}" ` : ""}${x.content ?? ""}`);
@@ -347,7 +347,7 @@ export const consultarPerguntaTool: ToolDefinition<typeof perguntaSchema> = {
   inputSchema: perguntaSchema,
   handler: async ({ seller, perguntaId }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const q = await ex.getQuestion(seller, perguntaId);
       const item = await safe(getItem(seller, q.item_id));
       const horas = q.date_created ? ((Date.now() - new Date(q.date_created).getTime()) / 3_600_000).toFixed(1) : "n/d";
@@ -370,7 +370,7 @@ export const tempoRespostaPerguntasTool: ToolDefinition<typeof tempoSchema> = {
   inputSchema: tempoSchema,
   handler: async ({ seller }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const r = await ex.getQuestionsResponseTime(seller, row.ml_user_id!);
       const faixa = (x: any) => (x?.response_time !== undefined ? `${x.response_time} min` : "n/d");
       return ok(
@@ -394,7 +394,7 @@ export const precoParaGanharTool: ToolDefinition<typeof mlbsSchema> = {
   inputSchema: mlbsSchema,
   handler: async ({ seller, mlbs }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const res = await mapLimit(mlbs, 4, async (id) => ({ id, r: await safe(ex.getPriceToWin(seller, id)) }));
       const lines = res.map(({ id, r }: any) =>
         isErr(r)
@@ -416,7 +416,7 @@ export const relatorioCatalogoTool: ToolDefinition<typeof catalogoSchema> = {
   inputSchema: catalogoSchema,
   handler: async ({ seller }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const ids = await searchAllItemIds(seller, row.ml_user_id!, 2000);
       const items = (await getItemsMultiget(seller, ids)).filter((i) => i.catalog_listing && i.status === "active");
       const res = await mapLimit(items, 4, async (i) => ({ i, r: await safe(ex.getPriceToWin(seller, i.id)) }));
@@ -443,7 +443,7 @@ export const elegibilidadeCatalogoTool: ToolDefinition<typeof mlbsSchema> = {
   inputSchema: mlbsSchema,
   handler: async ({ seller, mlbs }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const res = await mapLimit(mlbs, 4, async (id) => ({ id, r: await safe(ex.getCatalogEligibility(seller, id)) }));
       const lines = res.map(({ id, r }: any) =>
         isErr(r) ? `- ${id}: ${r.erro}` : `- ${id}: ${r.buy_box_eligible ? "elegível" : "não elegível"} | status ${r.status ?? "n/d"}${r.reason ? ` | ${r.reason}` : ""}`
@@ -462,7 +462,7 @@ export const sugestaoPrecoTool: ToolDefinition<typeof mlbsSchema> = {
   inputSchema: mlbsSchema,
   handler: async ({ seller, mlbs }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const res = await mapLimit(mlbs, 4, async (id) => ({ id, r: await safe(ex.getPriceSuggestion(seller, id)) }));
       const lines = res.map(({ id, r }: any) =>
         isErr(r)
@@ -484,7 +484,7 @@ export const tiposAnuncioTool: ToolDefinition<typeof tipoSchema> = {
   inputSchema: tipoSchema,
   handler: async ({ seller, mlb }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const item = await getItem(seller, mlb);
       const [up, down, fees] = await Promise.all([
         safe(ex.getAvailableUpgrades(seller, mlb)),
@@ -518,7 +518,7 @@ export const qualidadeAnunciosTool: ToolDefinition<typeof qualidadeSchema> = {
   inputSchema: qualidadeSchema,
   handler: async ({ seller, mlbs }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       let ids = mlbs;
       if (!ids?.length) {
         const all = await searchAllItemIds(seller, row.ml_user_id!, 1000);
@@ -548,7 +548,7 @@ export const promocoesDoAnuncioTool: ToolDefinition<typeof promoItemSchema> = {
   inputSchema: promoItemSchema,
   handler: async ({ seller, mlb }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const r = await ex.getItemPromotions(seller, mlb);
       const arr: any[] = Array.isArray(r) ? r : r.results ?? [];
       const lines = arr.map(
@@ -570,7 +570,7 @@ export const estoqueFullTool: ToolDefinition<typeof fullSchema> = {
   inputSchema: fullSchema,
   handler: async ({ seller, mlbs }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const ids = mlbs?.length ? mlbs : await searchAllItemIds(seller, row.ml_user_id!, 2000);
       const items = (await getItemsMultiget(seller, ids)).filter((i) => i.inventory_id && (mlbs?.length || i.status === "active"));
       const res = await mapLimit(items, 4, async (i) => ({ i, r: await safe(ex.getFulfillmentStock(seller, i.inventory_id!)) }));
@@ -596,7 +596,7 @@ export const visitasDiariasContaTool: ToolDefinition<typeof visitasContaSchema> 
   inputSchema: visitasContaSchema,
   handler: async ({ seller, dias }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const r = await ex.getSellerVisitsTimeWindow(seller, row.ml_user_id!, dias ?? 30);
       const res: any[] = r.results ?? [];
       const lines = res.map((d) => `${ymdBr(d.date)}: ${d.total}`);
@@ -617,7 +617,7 @@ export const faturamentoPeriodosTool: ToolDefinition<typeof billPeriodsSchema> =
   inputSchema: billPeriodsSchema,
   handler: async ({ seller, grupo }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const r = await ex.getBillingPeriods(seller, grupo ?? "ML", 12);
       const res: any[] = r.results ?? [];
       const lines = res.map((p) => `- ${p.key}: ${ymdBr(p.period?.date_from ?? "")} a ${ymdBr(p.period?.date_to ?? "")} | ${brl(p.amount)} | ${p.period_status ?? p.status ?? ""}`);
@@ -636,7 +636,7 @@ export const faturamentoResumoTool: ToolDefinition<typeof billSummarySchema> = {
   inputSchema: billSummarySchema,
   handler: async ({ seller, chave, grupo }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const r = await ex.getBillingSummary(seller, chave, grupo ?? "ML");
       const charges: any[] = r.bill_includes?.charges ?? r.charges ?? [];
       const bonuses: any[] = r.bill_includes?.bonuses ?? r.bonuses ?? [];
@@ -659,7 +659,7 @@ export const diagnosticoAnuncioTool: ToolDefinition<typeof diagSchema> = {
   inputSchema: diagSchema,
   handler: async ({ seller, mlb, dias }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const period = lastNDays(dias ?? 30);
       const item = await getItem(seller, mlb);
       const [visits, orders, perf, reviews, ptw, promos] = await Promise.all([

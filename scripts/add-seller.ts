@@ -17,7 +17,7 @@ if (!sellerName || !/^[a-z0-9_-]+$/i.test(sellerName)) {
   process.exit(1);
 }
 
-ensureSellerPlaceholder(sellerName);
+await ensureSellerPlaceholder(sellerName);
 
 const startUrl = new URL("/oauth/start", env.PUBLIC_BASE_URL);
 startUrl.searchParams.set("seller", sellerName);

@@ -15,14 +15,14 @@ if (!sellerName) {
   process.exit(1);
 }
 
-if (!getSellerByName(sellerName)) {
+if (!await getSellerByName(sellerName)) {
   console.error(`Seller "${sellerName}" não encontrado.`);
   process.exit(1);
 }
 
 try {
   await getValidAccessToken(sellerName);
-  const row = getSellerByName(sellerName)!;
+  const row = (await getSellerByName(sellerName))!;
   console.log(`OK — token de "${sellerName}" válido até ${row.token_expires_at}.`);
 } catch (err) {
   console.error(`Falha ao renovar "${sellerName}":`, err instanceof Error ? err.message : err);

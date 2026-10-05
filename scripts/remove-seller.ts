@@ -15,13 +15,13 @@ if (!sellerName) {
   process.exit(1);
 }
 
-const existing = getSellerByName(sellerName);
+const existing = await getSellerByName(sellerName);
 if (!existing) {
   console.error(`Seller "${sellerName}" não encontrado.`);
   process.exit(1);
 }
 
-deleteSeller(sellerName);
+await deleteSeller(sellerName);
 recordAudit(sellerName, "seller_removed_locally");
 console.log(`Seller "${sellerName}" removido do Enginne (tokens locais apagados).`);
 console.log("Lembrete: isso não revoga o grant no lado do Mercado Livre automaticamente.");

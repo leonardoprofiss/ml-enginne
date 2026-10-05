@@ -1,10 +1,10 @@
-import { getDb } from "./db.js";
+import { getStore } from "./db.js";
 import { childLogger } from "../utils/logger.js";
 
 const log = childLogger("migrate");
 
-// getDb() já aplica o schema.sql (idempotente, usa CREATE TABLE IF NOT EXISTS).
-// Este script serve como comando explícito `npm run db:migrate` para setup/CI.
-getDb();
-log.info("migração aplicada com sucesso (schema idempotente)");
+// Com o Firestore não existe schema para criar: as coleções nascem sozinhas
+// no primeiro documento gravado. Este comando só confere se o banco responde.
+await getStore().ping();
+log.info("armazenamento respondendo — nada a migrar");
 process.exit(0);

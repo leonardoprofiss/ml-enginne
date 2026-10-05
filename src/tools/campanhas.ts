@@ -125,7 +125,7 @@ export const consultarCampanhasTool: ToolDefinition<typeof campanhasSchema> = {
   inputSchema: campanhasSchema,
   handler: async ({ seller, dias, status, limite }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const { advertiserId, siteId } = await resolveAdvertiser(seller);
       const period = lastNDaysYmd(dias ?? 30);
       const max = limite ?? 50;
@@ -183,7 +183,7 @@ export const consultarMetricasCampanhaTool: ToolDefinition<typeof campanhaSchema
   inputSchema: campanhaSchema,
   handler: async ({ seller, campanhaId, dias }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const { siteId } = await resolveAdvertiser(seller);
       const period = lastNDaysYmd(dias ?? 30);
       const campaign = await getCampaign(seller, siteId, campanhaId, { dateFrom: period.from, dateTo: period.to });
@@ -204,7 +204,7 @@ export const consultarCompetitividadeCampanhaTool: ToolDefinition<typeof campanh
   inputSchema: campanhaSchema,
   handler: async ({ seller, campanhaId, dias }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const { siteId } = await resolveAdvertiser(seller);
       const period = lastNDaysYmd(dias ?? 30);
       const campaign = await getCampaign(seller, siteId, campanhaId, { dateFrom: period.from, dateTo: period.to });
@@ -233,7 +233,7 @@ export const consultarAdGroupsTool: ToolDefinition<typeof adGroupsSchema> = {
   inputSchema: adGroupsSchema,
   handler: async ({ seller, campanhaId, status, dias, limite }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const { advertiserId, siteId } = await resolveAdvertiser(seller);
       const period = lastNDaysYmd(dias ?? 30);
 
@@ -283,7 +283,7 @@ export const consultarItensAdGroupTool: ToolDefinition<typeof itensAdGroupSchema
   inputSchema: itensAdGroupSchema,
   handler: async ({ seller, adGroupId, dias }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const { siteId } = await resolveAdvertiser(seller);
       const period = lastNDaysYmd(dias ?? 30);
       const res = await listAdGroupItems(seller, siteId, adGroupId, { dateFrom: period.from, dateTo: period.to });
@@ -313,7 +313,7 @@ export const buscarAdGroupPorSkuTool: ToolDefinition<typeof buscarAdGroupSchema>
   inputSchema: buscarAdGroupSchema,
   handler: async ({ seller, skus }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const { advertiserId, siteId } = await resolveAdvertiser(seller);
       const groups = await findAdGroupsByItems(seller, siteId, advertiserId, skus);
       if (groups.length === 0) {

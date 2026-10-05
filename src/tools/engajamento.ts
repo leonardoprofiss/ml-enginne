@@ -18,7 +18,7 @@ export const consultarVisitasTool: ToolDefinition<typeof visitasSchema> = {
   inputSchema: visitasSchema,
   handler: async ({ seller, mlbs, dias }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       // date_from/date_to da API de Visitas exigem YYYY-MM-DD — um ISO completo
       // (com hora/milissegundos) é rejeitado com "unknown date format".
       const period = lastNDaysYmd(dias ?? 30);
@@ -47,7 +47,7 @@ export const consultarPerguntasTool: ToolDefinition<typeof perguntasSchema> = {
   inputSchema: perguntasSchema,
   handler: async ({ seller, status, limite }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const st = status && status !== "todos" ? status : "UNANSWERED";
       const res = await searchQuestions(seller, row.ml_user_id!, { status: st, limit: limite ?? 50 });
       const lines = res.questions.map((q) => `- [${q.id}] item ${q.item_id}: "${q.text}" (${q.date_created})`);
@@ -83,7 +83,7 @@ export const responderPerguntaTool: ToolDefinition<typeof responderPerguntaSchem
   inputSchema: responderPerguntaSchema,
   handler: async ({ seller, perguntaId, texto, confirmar }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
 
       if (!confirmar) {
         return ok(

@@ -45,7 +45,7 @@ function isExpiringSoon(row: SellerRow): boolean {
  * via refresh_token quando necessário. Nunca retorna token expirado.
  */
 export async function getValidAccessToken(sellerName: string): Promise<string> {
-  const row = getSellerByName(sellerName);
+  const row = await getSellerByName(sellerName);
   if (!row) throw new SellerNotFoundError(sellerName);
   if (row.status === "revoked" || row.status === "pending") {
     throw new SellerNotAuthorizedError(sellerName, row.status);
@@ -66,7 +66,7 @@ export async function getValidAccessToken(sellerName: string): Promise<string> {
     try {
       log.info({ sellerName }, "renovando access_token");
       const fresh = await refreshTokens(tokens.refreshToken);
-      saveTokens(sellerName, fresh);
+      await saveTokens(sellerName, fresh);
       recordAudit(sellerName, "token_refreshed");
       return fresh.accessToken;
     } catch (err) {
@@ -74,9 +74,9 @@ export async function getValidAccessToken(sellerName: string): Promise<string> {
       const transient = (err as { transient?: boolean })?.transient === true;
       if ((err as { code?: string })?.code === "invalid_grant") {
         // refresh_token rejeitado de vez (revogado/expirado): precisa reautorizar.
-        markSellerError(sellerName, `Reautorização necessária: ${message}`);
+        await markSellerError(sellerName, `Reautorização necessária: ${message}`);
       } else if (!transient) {
-        markSellerError(sellerName, message);
+        await markSellerError(sellerName, message);
       }
       recordAudit(sellerName, "token_refresh_failed", message);
       log.error({ sellerName, err: message }, "falha ao renovar token");

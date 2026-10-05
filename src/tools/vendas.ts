@@ -25,7 +25,7 @@ export const consultarVendasTool: ToolDefinition<typeof periodoSchema> = {
   inputSchema: periodoSchema,
   handler: async ({ seller, dias }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const period = lastNDays(dias ?? 30);
       const orders = await searchAllOrders(seller, row.ml_user_id!, { dateFrom: period.from, dateTo: period.to });
       const s = summarizeOrders(orders);
@@ -59,7 +59,7 @@ export const consultarPedidosTool: ToolDefinition<typeof pedidosSchema> = {
   inputSchema: pedidosSchema,
   handler: async ({ seller, dias, status, limite }) => {
     try {
-      const row = resolveSeller(seller);
+      const row = await resolveSeller(seller);
       const period = lastNDays(dias ?? 30);
       const max = limite ?? 50;
       const orders = await searchAllOrders(seller, row.ml_user_id!, {

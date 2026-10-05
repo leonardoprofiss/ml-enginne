@@ -17,12 +17,12 @@ export function getBlingRedirectUri(): string {
   return new URL("/oauth/bling/callback", env.PUBLIC_BASE_URL).toString();
 }
 
-export function startBlingAuthorization(sellerName: string): string {
+export async function startBlingAuthorization(sellerName: string): Promise<string> {
   assertBlingConfigured();
   const state = generateState();
   const redirectUri = getBlingRedirectUri();
 
-  saveBlingPendingAuthorization({ state, sellerName, redirectUri });
+  await saveBlingPendingAuthorization({ state, sellerName, redirectUri });
 
   const url = new URL(`${env.BLING_AUTH_DOMAIN}/authorize`);
   url.searchParams.set("response_type", "code");

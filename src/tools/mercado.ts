@@ -53,7 +53,7 @@ export const pesquisarMercadoTool: ToolDefinition<typeof pesquisaSchema> = {
   inputSchema: pesquisaSchema,
   handler: async ({ seller, termo, categoria, ordenar, condicao, limite, site }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const siteId = site ?? "MLB";
       const sortMap = { relevancia: "relevance", menor_preco: "price_asc", maior_preco: "price_desc" } as const;
       const conditionMap = { novo: "new", usado: "used" } as const;
@@ -103,7 +103,7 @@ export const compararConcorrenciaTool: ToolDefinition<typeof compararSchema> = {
   inputSchema: compararSchema,
   handler: async ({ seller, mlb, termo, limite }) => {
     try {
-      resolveSeller(seller);
+      await resolveSeller(seller);
       const our = await getItem(seller, mlb);
       const termoBusca = termo ?? our.title;
       const siteId = mlb.match(/^[A-Z]{2,4}/)?.[0] ?? "MLB";
